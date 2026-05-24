@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { useGLTF } from '@react-three/drei';
 import * as THREE from 'three';
-import { SkeletonUtils } from 'three-stdlib'; // CRITICAL: Safely clones animation skeletons
+import { SkeletonUtils } from 'three-stdlib'; // CRITICAL: Prevents 2nd-trial animation freezes
 
 // Preload assets
 useGLTF.preload("/models/penguin.glb");
@@ -28,13 +28,17 @@ function XRManager({ session }) {
 function PlayerPenguin() {
   const group = useRef();
   const { scene, animations } = useGLTF("/models/penguin.glb");
-  const mixer = useMemo(() => new THREE.AnimationMixer(scene), [scene]);
+  
+  // FIX: Safely clones the skeleton so it never freezes on the 2nd trial
+  const clonedScene = useMemo(() => SkeletonUtils.clone(scene), [scene]);
+  const mixer = useMemo(() => new THREE.AnimationMixer(clonedScene), [clonedScene]);
   const { camera } = useThree();
 
   useEffect(() => {
     if (animations && animations.length > 0) {
       mixer.clipAction(animations[0]).reset().play();
     }
+    return () => mixer.stopAllAction();
   }, [mixer, animations]);
 
   useFrame((_, delta) => {
@@ -52,7 +56,7 @@ function PlayerPenguin() {
   return (
     <group ref={group}>
       <group rotation={[0, -Math.PI / 2 + Math.PI, 0]}>
-        <primitive object={scene} scale={0.15} />
+        <primitive object={clonedScene} scale={0.15} />
       </group>
     </group>
   );
@@ -61,14 +65,16 @@ function PlayerPenguin() {
 // --- 2. ENVIRONMENT COMPONENT ---
 function Environment() {
   const { scene, animations } = useGLTF("/models/seabed.glb");
-  const mixer = useMemo(() => new THREE.AnimationMixer(scene), [scene]);
+  
+  const clonedScene = useMemo(() => SkeletonUtils.clone(scene), [scene]);
+  const mixer = useMemo(() => new THREE.AnimationMixer(clonedScene), [clonedScene]);
 
   useEffect(() => {
     if (animations && animations.length > 0) {
       animations.forEach((clip) => mixer.clipAction(clip).reset().play());
     }
-    if (scene) {
-      scene.traverse((child) => {
+    if (clonedScene) {
+      clonedScene.traverse((child) => {
         if (child.isMesh) {
           child.castShadow = true;
           child.receiveShadow = true;
@@ -80,7 +86,8 @@ function Environment() {
         }
       });
     }
-  }, [scene, animations, mixer]);
+    return () => mixer.stopAllAction();
+  }, [clonedScene, animations, mixer]);
 
   useFrame((_, delta) => mixer.update(delta));
 
@@ -89,7 +96,7 @@ function Environment() {
       <ambientLight intensity={0.9} color="#bae6fd" />
       <directionalLight position={[2, 8, 2]} intensity={1.5} color="#e0f2fe" />
       <pointLight position={[0, 2, 0]} intensity={0.5} color="#38bdf8" />
-      <primitive object={scene} position={[0, -1.4, -1.5]} scale={[1.2, 1.2, 1.2]} />
+      <primitive object={clonedScene} position={[0, -1.4, -1.5]} scale={[1.2, 1.2, 1.2]} />
     </group>
   );
 }
@@ -120,8 +127,8 @@ function Spawner({ setItems }) {
           id: Date.now() + Math.random(),
           type: itemType,
           pos: [spawnX, spawnY, spawnZ],
-          // SLOWER SPEED APPLIED HERE
-          speed: 0.5 + Math.random() * 0.4 
+          // SLOWER SPEED APPLIED
+          speed: 0.3 + Math.random() * 0.3 
         }
       ]);
     }, 2000);
@@ -137,7 +144,6 @@ function AnimatedItem({ modelPath, position, scale }) {
   const group = useRef();
   const { scene, animations } = useGLTF(modelPath);
   
-  // SkeletonUtils allows cloned meshes to keep their animation bones
   const clonedScene = useMemo(() => SkeletonUtils.clone(scene), [scene]);
   const mixer = useMemo(() => new THREE.AnimationMixer(clonedScene), [clonedScene]);
 
@@ -206,6 +212,7 @@ export default function App() {
   // AUDIO REFS
   const ambienceAudio = useRef(null);
   const chirpAudio = useRef(null);
+  const collectAudio = useRef(null);
 
   useEffect(() => {
     ambienceAudio.current = new Audio("/audios/antarctic_ambience.mp3");
@@ -214,6 +221,9 @@ export default function App() {
 
     chirpAudio.current = new Audio("/audios/baby_penguin.mp3");
     chirpAudio.current.volume = 1.0;
+
+    collectAudio.current = new Audio("/audios/fish_collect.mp3");
+    collectAudio.current.volume = 0.8;
 
     return () => {
       if (ambienceAudio.current) ambienceAudio.current.pause();
@@ -257,7 +267,7 @@ export default function App() {
       setHealth(50);
       setFishCount(0);
       setSquidCount(0);
-      setTimeLeft(60); // Reset to 60s
+      setTimeLeft(60); 
       setItems([]);
       setGameState('PLAYING');
 
@@ -278,43 +288,67 @@ export default function App() {
     }
   };
 
-  function GameLoop() {
+  // Safe State Updater for Collections
+  const handleCollect = (type) => {
+    if (typeof window !== "undefined" && window.navigator && window.navigator.vibrate) {
+      window.navigator.vibrate(40);
+    }
+    if (collectAudio.current) {
+      collectAudio.current.currentTime = 0;
+      collectAudio.current.play().catch(e => console.log("Audio blocked:", e));
+    }
+
+    if (type === 'fish') {
+      setHealth((h) => Math.min(100, h + 10)); // +1x
+      setFishCount((f) => f + 1);
+    } else if (type === 'squid') {
+      setHealth((h) => Math.min(100, h + 20)); // +2x
+      setSquidCount((s) => s + 1);
+    } else if (type === 'plastic') {
+      setHealth((h) => Math.max(0, h - 20));   // -2x
+    }
+  };
+
+  function GameLoop({ onCollect }) {
     const { camera } = useThree();
     
     useFrame((_, delta) => {
       setItems((prevItems) => {
-        return prevItems
-          .map((item) => {
-            const currentPos = new THREE.Vector3(...item.pos);
-            const targetPos = new THREE.Vector3(camera.position.x, currentPos.y, camera.position.z);
-            const direction = new THREE.Vector3().subVectors(targetPos, currentPos).normalize();
-            currentPos.addScaledVector(direction, item.speed * delta);
-            
-            return { ...item, pos: [currentPos.x, currentPos.y, currentPos.z] };
-          })
-          .filter((item) => {
-            const itemVec = new THREE.Vector3(...item.pos);
-            
-            // CRITICAL FIX: Measure distance to the PENGUIN, not the Camera!
-            const penguinPos = new THREE.Vector3(0, -0.25, -1.3).applyMatrix4(camera.matrixWorld);
-            const distToPenguin = penguinPos.distanceTo(itemVec);
+        let collectedType = null;
 
-            // Tighter collision radius (0.4 instead of 1.4) so they actually touch the beak
-            if (distToPenguin < 0.4) { 
-              if (item.type === 'fish') {
-                setHealth((h) => Math.min(100, h + 10)); // +1x
-                setFishCount((f) => f + 1);
-              } else if (item.type === 'squid') {
-                setHealth((h) => Math.min(100, h + 20)); // +2x
-                setSquidCount((s) => s + 1);
-              } else if (item.type === 'plastic') {
-                setHealth((h) => Math.max(0, h - 20));   // -2x
-              }
-              return false; // Remove item from screen
-            }
-            // Cleanup items that float too far away
-            return itemVec.distanceTo(camera.position) < 8; 
-          });
+        const nextItems = prevItems.map((item) => {
+          const currentPos = new THREE.Vector3(...item.pos);
+          const targetPos = new THREE.Vector3(camera.position.x, currentPos.y, camera.position.z);
+          
+          // FIX: Prevents NaN math collapse (blinking at origin)
+          const direction = new THREE.Vector3().subVectors(targetPos, currentPos);
+          if (direction.lengthSq() > 0.001) {
+            direction.normalize();
+            currentPos.addScaledVector(direction, item.speed * delta);
+          }
+          
+          return { ...item, pos: [currentPos.x, currentPos.y, currentPos.z] };
+        }).filter((item) => {
+          const itemVec = new THREE.Vector3(...item.pos);
+          
+          // FIX: Tighter hit detection accurately placed at the penguin's beak
+          const penguinPos = new THREE.Vector3(0, -0.25, -1.3).applyMatrix4(camera.matrixWorld);
+          const distToPenguin = penguinPos.distanceTo(itemVec);
+
+          if (distToPenguin < 0.45) { 
+            collectedType = item.type;
+            return false; // Safely delete item from scene
+          }
+          
+          return itemVec.distanceTo(camera.position) < 8; 
+        });
+
+        // Safely triggers the UI outside of the ThreeJS rendering frame
+        if (collectedType) {
+          setTimeout(() => onCollect(collectedType), 0);
+        }
+
+        return nextItems;
       });
     });
     return null;
@@ -337,13 +371,13 @@ export default function App() {
               0:{timeLeft.toString().padStart(2, '0')}
             </div>
             
-            {/* NEW HEALTH BAR SYSTEM */}
+            {/* HEALTH BAR SYSTEM */}
             <div style={{ fontSize: '12px', color: '#94a3b8', marginBottom: '4px', textAlign: 'right' }}>ENERGY</div>
             <div style={{ width: '120px', height: '14px', background: 'rgba(0,0,0,0.6)', borderRadius: '10px', overflow: 'hidden', border: '2px solid rgba(255,255,255,0.2)' }}>
               <div style={{ 
                 width: `${health}%`, 
                 height: '100%', 
-                background: health > 30 ? '#4ade80' : '#ef4444', // Turns red if low
+                background: health > 30 ? '#4ade80' : '#ef4444',
                 transition: 'width 0.3s ease-out, background-color 0.3s ease'
               }} />
             </div>
@@ -398,7 +432,7 @@ export default function App() {
           <>
             <PlayerPenguin />
             <Spawner setItems={setItems} />
-            <GameLoop />
+            <GameLoop onCollect={handleCollect} />
             {items.map((item) => (
               <GameItem key={item.id} type={item.type} position={item.pos} />
             ))}
