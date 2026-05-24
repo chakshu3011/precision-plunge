@@ -23,7 +23,6 @@ function XRManager({ session }) {
   return null;
 }
 
-// --- NEW FEATURE: BUBBLES ---
 function Bubbles() {
   const pointsRef = useRef();
   const [particles] = useState(() => {
@@ -42,7 +41,6 @@ function Bubbles() {
     const positions = pointsRef.current.geometry.attributes.position.array;
     for (let i = 0; i < 75; i++) {
       positions[i * 3 + 1] += particles[i].vel * delta; 
-      // Reset bubble to floor when it hits the "roof"
       if (positions[i * 3 + 1] > 4) {
         positions[i * 3 + 1] = -1.5; 
       }
@@ -65,7 +63,6 @@ function Bubbles() {
   );
 }
 
-// 1. PENGUIN (Cleaned up, relying on hard-reload for stability)
 function PlayerPenguin() {
   const group = useRef();
   const { scene, animations } = useGLTF("/models/penguin.glb");
@@ -97,7 +94,6 @@ function PlayerPenguin() {
   );
 }
 
-// 2. ENVIRONMENT WITH WATER ROOF & SUN RAYS
 function Environment() {
   const group = useRef();
   const { scene, animations } = useGLTF("/models/seabed.glb");
@@ -130,16 +126,13 @@ function Environment() {
       <directionalLight position={[2, 8, 2]} intensity={1.5} color="#e0f2fe" />
       <pointLight position={[0, 2, 0]} intensity={0.5} color="#38bdf8" />
       
-      {/* Seabed Model */}
       <primitive object={scene} position={[0, -1.4, -1.5]} scale={[1.2, 1.2, 1.2]} />
 
-      {/* NEW: Water Roof */}
       <mesh position={[0, 3.5, 0]} rotation={[-Math.PI / 2, 0, 0]}>
         <planeGeometry args={[50, 50]} />
         <meshBasicMaterial color="#0ea5e9" transparent opacity={0.2} side={THREE.DoubleSide} />
       </mesh>
 
-      {/* NEW: Sun Rays */}
       <mesh position={[0, 1.5, -2]} rotation={[Math.PI / 8, 0, 0]}>
         <cylinderGeometry args={[0.2, 4, 8, 32]} />
         <meshBasicMaterial color="#e0f2fe" transparent opacity={0.08} depthWrite={false} blending={THREE.AdditiveBlending} side={THREE.DoubleSide} />
@@ -153,14 +146,17 @@ function Environment() {
   );
 }
 
-// 3. SPAWNER 
 function Spawner({ onSpawn }) {
   const { camera } = useThree();
 
   useEffect(() => {
     const interval = setInterval(() => {
-      const types = ['fish', 'squid', 'plastic'];
-      const itemType = types[Math.floor(Math.random() * types.length)];
+      // 1. UPDATED PROBABILITIES: Fish 60%, Squid 30%, Plastic 10%
+      const rand = Math.random();
+      let itemType;
+      if (rand < 0.60) itemType = 'fish';
+      else if (rand < 0.90) itemType = 'squid';
+      else itemType = 'plastic';
       
       const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
       forward.y = 0; 
@@ -187,7 +183,6 @@ function Spawner({ onSpawn }) {
   return null;
 }
 
-// 4. GAME OBJECT RENDERERS (Only cloned objects need SkeletonUtils)
 function AnimatedItem({ modelPath, scale }) {
   const { scene, animations } = useGLTF(modelPath);
   const clonedScene = useMemo(() => SkeletonUtils.clone(scene), [scene]);
@@ -340,7 +335,6 @@ export default function App() {
       session.addEventListener('end', () => {
         setXrSession(null);
         if (ambienceAudio.current) ambienceAudio.current.pause();
-        // Uses functional state update to prevent forcing menu if already in gameover
         setGameState(prev => prev === 'PLAYING' ? 'MENU' : prev);
       });
     } catch (e) {
@@ -384,9 +378,16 @@ export default function App() {
     }, 0);
   }, []);
 
-  // PRODUCTION FIX: Hard reload clears corrupted WebGL contexts entirely
   const handlePlayAgain = () => {
     window.location.reload();
+  };
+
+  // 2. UPDATED DYNAMIC BATTERY MESSAGES
+  const getBatteryMessage = () => {
+    if (health >= 80) return "Incredible! ICY is completely full of energy! 🐧✨";
+    if (health >= 40) return "Good job! ICY safely navigated the waters. 🌊🐟";
+    if (health > 0) return "Phew! That was close. ICY is exhausted! 🔋📉";
+    return "Oh no! Too much plastic drained ICY's energy. 💔";
   };
 
   return (
@@ -434,7 +435,6 @@ export default function App() {
         </div>
       )}
 
-      {/* GAME OVER SCREEN */}
       {gameState === 'GAMEOVER' && (
         <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', zIndex: 20, background: 'rgba(11, 29, 58, 0.95)', color: '#fff', fontFamily: 'sans-serif', padding: '20px', textAlign: 'center' }}>
           <h1 style={{ fontSize: '42px', marginBottom: '8px', color: health <= 0 ? '#ef4444' : '#f8fafc' }}>
@@ -443,7 +443,12 @@ export default function App() {
           
           <div style={{ background: 'rgba(255, 255, 255, 0.05)', padding: '24px 40px', borderRadius: '12px', margin: '20px 0 30px 0', border: '1px solid rgba(255,255,255,0.1)' }}>
             <div style={{ fontSize: '16px', color: '#94a3b8', marginBottom: '8px' }}>FINAL BATTERY LEVEL</div>
-            <div style={{ fontSize: '48px', fontWeight: 'bold', color: health > 30 ? '#4ade80' : '#ef4444', marginBottom: '16px' }}>{health}%</div>
+            <div style={{ fontSize: '48px', fontWeight: 'bold', color: health > 30 ? '#4ade80' : '#ef4444', marginBottom: '10px' }}>{health}%</div>
+            
+            {/* Added Dynamic Text */}
+            <div style={{ fontSize: '15px', color: '#cbd5e1', fontStyle: 'italic', marginBottom: '16px' }}>
+              "{getBatteryMessage()}"
+            </div>
             
             <div style={{ display: 'flex', gap: '20px', justifyContent: 'center', fontSize: '14px' }}>
               <span style={{ color: '#4ade80' }}>Fish: {fishCount}</span>
@@ -462,12 +467,12 @@ export default function App() {
         </div>
       )}
 
-      {/* NEW: THANK YOU SCREEN */}
+      {/* 3. UPDATED: THANK YOU SCREEN */}
       {gameState === 'THANKYOU' && (
-        <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', zIndex: 30, background: 'rgba(11, 29, 58, 1)', color: '#fff', fontFamily: 'sans-serif', padding: '20px', textAlign: 'center' }}>
+        <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', zIndex: 30, background: 'rgba(11, 29, 58, 1)', color: '#fff', fontFamily: 'sans-serif', padding: '30px', textAlign: 'center' }}>
           <h1 style={{ fontSize: '48px', marginBottom: '15px', color: '#38bdf8' }}>Thank You!</h1>
-          <p style={{ fontSize: '18px', color: '#cbd5e1', maxWidth: '400px', lineHeight: '1.6', marginBottom: '40px' }}>
-            Thank you for playing ICY AR and helping keep our virtual oceans clean and safe.
+          <p style={{ fontSize: '18px', color: '#cbd5e1', maxWidth: '450px', lineHeight: '1.6', marginBottom: '40px' }}>
+            Thank you for playing ICY AR! Plastic pollution is incredibly deadly to marine life. By helping ICY safely avoid the plastic bottles, you did your part to keep our virtual oceans clean and safe.
           </p>
           <div style={{ width: '60px', height: '4px', background: '#38bdf8', borderRadius: '2px', opacity: 0.5 }}></div>
         </div>
