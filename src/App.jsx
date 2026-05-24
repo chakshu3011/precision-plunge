@@ -146,6 +146,16 @@ export default function App() {
     }
   };
 
+  useEffect(() => {
+  if (navigator.xr) {
+    navigator.xr.isSessionSupported('immersive-ar').then((supported) => {
+      console.log("Is AR Supported:", supported);
+    });
+  } else {
+    console.log("WebXR not found on this browser.");
+  }
+}, []);
+
   return (
     <div style={{ width: "100vw", height: "100dvh", position: "relative", backgroundColor: "#000" }}>
       
@@ -159,9 +169,21 @@ export default function App() {
       </div>
 
       <ARButton
-        sessionInit={{ requiredFeatures: ["local-floor"] }}
-        style={{ position: 'absolute', bottom: '40px', left: '50%', transform: 'translateX(-50%)', padding: '14px 28px', fontSize: '16px', fontWeight: 'bold', borderRadius: '30px', border: 'none', zIndex: 20 }}
-      />
+  sessionInit={{ 
+    requiredFeatures: ["local-floor"],
+    optionalFeatures: ["hit-test", "dom-overlay"],
+    domOverlay: { root: document.body }
+  }}
+  // Added these styles to ensure it forces visibility
+  style={{ 
+    position: 'absolute', 
+    bottom: '40px', 
+    left: '50%', 
+    transform: 'translateX(-50%)', 
+    zIndex: 1000, 
+    display: 'block' 
+  }}
+/>
 
       <Canvas style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%" }}>
         <XR onSessionStart={() => setIsARActive(true)} onSessionEnd={() => setIsARActive(false)}>
