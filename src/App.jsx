@@ -27,15 +27,17 @@ function PlayerPenguin() {
     // UNLOCKED: The penguin now smoothly moves in full 3D space (including up and down!)
     group.current.position.lerp(targetPosition, delta * 5.5);
 
-    // Keep the penguin rotated toward your phone's position
+    // Keep the outer group rotated toward your phone's position
     const lookTarget = new THREE.Vector3(camera.position.x, camera.position.y, camera.position.z);
     group.current.lookAt(lookTarget);
   });
 
   return (
-    <group ref={group} position={[0, 0, 0]}>
-      {/* rotation={[0, -Math.PI / 2, 0]} corrects models that face sideways by default */}
-      <primitive object={penguin.scene} scale={0.15} rotation={[0, -Math.PI / 2, 0]} />
+    <group ref={group}>
+      {/* Inner group isolates the correction rotation so the penguin stays right-side up */}
+      <group rotation={[0, -Math.PI / 2, 0]}>
+        <primitive object={penguin.scene} scale={0.15} />
+      </group>
     </group>
   );
 }
@@ -55,16 +57,6 @@ function Environment() {
       <ambientLight intensity={0.9} color="#bae6fd" />
       <directionalLight position={[2, 8, 2]} intensity={1.5} color="#e0f2fe" />
       <pointLight position={[0, 2, 0]} intensity={0.5} color="#38bdf8" />
-
-      {/* SOLID OCEAN FLOOR (Opaque seabed - blocks out your real floor) */}
-      <mesh position={[0, -0.2, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-        <planeGeometry args={[30, 30]} />
-        <meshStandardMaterial 
-          color="#0b1d3a" 
-          roughness={0.9} 
-          metalness={0.1}
-        />
-      </mesh>
 
       {/* SEMI-TRANSPARENT ROOF (Maintains the open-air underwater look) */}
       <mesh ref={ceilingRef} position={[0, 3.0, 0]} rotation={[Math.PI / 2, 0, 0]}>
