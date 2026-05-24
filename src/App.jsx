@@ -1,7 +1,15 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { useGLTF, useAnimations } from '@react-three/drei';
+import { useGLTF } from '@react-three/drei';
 import * as THREE from 'three';
+import { SkeletonUtils } from 'three-stdlib'; // CRITICAL: Safely clones model skeletons
+
+// Preload assets to avoid mid-game stuttering
+useGLTF.preload("/models/penguin.glb");
+useGLTF.preload("/models/seabed.glb");
+useGLTF.preload("/models/fish.glb");
+useGLTF.preload("/models/squid.glb");
+useGLTF.preload("/models/plastic.glb");
 
 // --- EXTRA ENGINE UTILITY: XR BINDER ---
 function XRManager({ session }) {
@@ -19,23 +27,26 @@ function XRManager({ session }) {
 // --- 1. PLAYER PENGUIN COMPONENT ---
 function PlayerPenguin() {
   const group = useRef();
-  const penguin = useGLTF("/models/penguin.glb");
-  const { actions, names } = useAnimations(penguin.animations, group);
+  const { scene, animations } = useGLTF("/models/penguin.glb");
+  
+  // Manual Mixer guarantees animations run regardless of XR rendering contexts
+  const mixer = useMemo(() => new THREE.AnimationMixer(scene), [scene]);
   const { camera } = useThree();
 
   useEffect(() => {
-    if (names && names.length > 0 && actions[names[0]]) {
-      actions[names[0]].reset().fadeIn(0.2).play();
+    if (animations && animations.length > 0) {
+      mixer.clipAction(animations[0]).reset().play();
     }
-  }, [actions, names]);
+  }, [mixer, animations]);
 
   useFrame((_, delta) => {
+    mixer.update(delta); // Force animation forward every frame
+    
     if (!group.current) return;
     const targetPosition = new THREE.Vector3(0, -0.25, -1.3);
     targetPosition.applyMatrix4(camera.matrixWorld);
     group.current.position.lerp(targetPosition, delta * 5.5);
     
-    // Penguin looks forward (Math.PI / 2 correction ensures it faces into the scene)
     const lookTarget = new THREE.Vector3(camera.position.x, group.current.position.y, camera.position.z);
     group.current.lookAt(lookTarget);
   });
@@ -43,7 +54,7 @@ function PlayerPenguin() {
   return (
     <group ref={group}>
       <group rotation={[0, -Math.PI / 2 + Math.PI, 0]}>
-        <primitive object={penguin.scene} scale={0.15} />
+        <primitive object={scene} scale={0.15} />
       </group>
     </group>
   );
@@ -51,9 +62,15 @@ function PlayerPenguin() {
 
 // --- 2. ENVIRONMENT COMPONENT ---
 function Environment() {
-  const { scene } = useGLTF("/models/seabed.glb");
+  const { scene, animations } = useGLTF("/models/seabed.glb");
+  const mixer = useMemo(() => new THREE.AnimationMixer(scene), [scene]);
 
   useEffect(() => {
+    // Force play any background animations (like seaweed swaying)
+    if (animations && animations.length > 0) {
+      animations.forEach((clip) => mixer.clipAction(clip).reset().play());
+    }
+
     if (scene) {
       scene.traverse((child) => {
         if (child.isMesh) {
@@ -68,20 +85,16 @@ function Environment() {
         }
       });
     }
-  }, [scene]);
+  }, [scene, animations, mixer]);
+
+  useFrame((_, delta) => mixer.update(delta));
 
   return (
     <group>
       <ambientLight intensity={0.9} color="#bae6fd" />
       <directionalLight position={[2, 8, 2]} intensity={1.5} color="#e0f2fe" />
       <pointLight position={[0, 2, 0]} intensity={0.5} color="#38bdf8" />
-
-      {/* Custom Sketchfab Seabed */}
-      <primitive 
-        object={scene} 
-        position={[0, -1.4, -1.5]} 
-        scale={[1.2, 1.2, 1.2]} 
-      />
+      <primitive object={scene} position={[0, -1.4, -1.5]} scale={[1.2, 1.2, 1.2]} />
     </group>
   );
 }
@@ -125,20 +138,22 @@ function Spawner({ setItems }) {
 
 // --- 4. GAME OBJECT RENDERERS ---
 
-// Reusable component for items with animations (Fish & Squid)
 function AnimatedItem({ modelPath, position, scale }) {
   const group = useRef();
   const { scene, animations } = useGLTF(modelPath);
   
-  // Clone the scene so multiple fish/squid can exist at the same time without breaking
-  const clonedScene = useMemo(() => scene.clone(), [scene]);
-  const { actions, names } = useAnimations(animations, group);
+  // CRITICAL FIX: SkeletonUtils safely clones the animation bones
+  const clonedScene = useMemo(() => SkeletonUtils.clone(scene), [scene]);
+  const mixer = useMemo(() => new THREE.AnimationMixer(clonedScene), [clonedScene]);
 
   useEffect(() => {
-    if (names.length > 0 && actions[names[0]]) {
-      actions[names[0]].reset().play().setEffectiveTimeScale(1.5); // Slightly faster animation speed
+    if (animations && animations.length > 0) {
+      const action = mixer.clipAction(animations[0]);
+      action.reset().play().setEffectiveTimeScale(1.5);
     }
-  }, [actions, names]);
+  }, [mixer, animations]);
+
+  useFrame((_, delta) => mixer.update(delta));
 
   return (
     <group ref={group} position={position}>
@@ -147,20 +162,25 @@ function AnimatedItem({ modelPath, position, scale }) {
   );
 }
 
-// Reusable component for static items (Plastic)
 function StaticItem({ modelPath, position, scale }) {
+  const group = useRef();
   const { scene } = useGLTF(modelPath);
   const clonedScene = useMemo(() => scene.clone(), [scene]);
   
+  useFrame((_, delta) => {
+    if (group.current) {
+      group.current.rotation.x += delta * 0.5;
+      group.current.rotation.y += delta * 0.5;
+    }
+  });
+
   return (
-    <group position={position}>
-      {/* Added a slow continuous rotation to the plastic so it tumbles in the water */}
+    <group ref={group} position={position}>
       <primitive object={clonedScene} scale={scale} />
     </group>
   );
 }
 
-// Main switch for spawned items (UPDATED SIZES AND SQUID)
 function GameItem({ type, position }) {
   if (type === 'fish') return <AnimatedItem modelPath="/models/fish.glb" position={position} scale={0.0015} />;
   if (type === 'squid') return <AnimatedItem modelPath="/models/squid.glb" position={position} scale={0.5} />;
@@ -170,7 +190,7 @@ function GameItem({ type, position }) {
 
 // --- 5. MAIN APP CONTAINER ---
 export default function App() {
-  const [gameState, setGameState] = useState('MENU'); // MENU, PLAYING, GAMEOVER
+  const [gameState, setGameState] = useState('MENU'); 
   const [items, setItems] = useState([]);
   const [score, setScore] = useState(0);
   const [fishCount, setFishCount] = useState(0);
@@ -178,7 +198,6 @@ export default function App() {
   const [timeLeft, setTimeLeft] = useState(30);
   const [xrSession, setXrSession] = useState(null);
 
-  // Timer Logic
   useEffect(() => {
     let timer;
     if (gameState === 'PLAYING' && timeLeft > 0) {
@@ -186,13 +205,12 @@ export default function App() {
     } else if (timeLeft === 0 && gameState === 'PLAYING') {
       setGameState('GAMEOVER');
       if (xrSession) {
-        xrSession.end(); // Auto-exit AR when game is over
+        xrSession.end();
       }
     }
     return () => clearInterval(timer);
   }, [gameState, timeLeft, xrSession]);
 
-  // UPDATED XR SESSION BINDING (WITH DOM-OVERLAY)
   const initiateXRSession = async () => {
     if (!navigator.xr) {
       setGameState('PLAYING');
@@ -262,7 +280,6 @@ export default function App() {
   return (
     <div id="xr-overlay" style={{ width: '100vw', height: '100vh', position: 'relative', overflow: 'hidden', background: gameState === 'PLAYING' ? 'transparent' : '#0b1d3a' }}>
       
-      {/* GAMEPLAY HUD */}
       {gameState === 'PLAYING' && (
         <>
           <div style={{ position: 'absolute', top: '20px', left: '20px', zIndex: 10, background: 'rgba(15, 23, 42, 0.75)', padding: '12px', borderRadius: '8px', color: '#fff', fontFamily: 'sans-serif' }}>
@@ -282,7 +299,6 @@ export default function App() {
         </>
       )}
 
-      {/* MAIN MENU */}
       {gameState === 'MENU' && (
         <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', zIndex: 20, background: 'rgba(11, 29, 58, 0.95)', color: '#fff', fontFamily: 'sans-serif', padding: '20px', textAlign: 'center' }}>
           <h1 style={{ fontSize: '36px', marginBottom: '8px', letterSpacing: '2px' }}>ICY AR</h1>
@@ -299,7 +315,6 @@ export default function App() {
         </div>
       )}
 
-      {/* GAME OVER SCREEN */}
       {gameState === 'GAMEOVER' && (
         <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', zIndex: 20, background: 'rgba(11, 29, 58, 0.95)', color: '#fff', fontFamily: 'sans-serif', padding: '20px', textAlign: 'center' }}>
           <h1 style={{ fontSize: '42px', marginBottom: '8px', color: '#f8fafc' }}>TIME'S UP!</h1>
