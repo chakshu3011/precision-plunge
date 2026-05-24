@@ -4,6 +4,7 @@ import { useGLTF } from '@react-three/drei';
 import * as THREE from 'three';
 import { SkeletonUtils } from 'three-stdlib';
 
+// Preload assets
 useGLTF.preload("/models/penguin.glb");
 useGLTF.preload("/models/seabed.glb");
 useGLTF.preload("/models/fish.glb");
@@ -22,7 +23,7 @@ function XRManager({ session }) {
   return null;
 }
 
-// 1. PENGUIN (Fixed 2nd Trial Freeze)
+// 1. PENGUIN (PERPETUAL MOTION BYPASS)
 function PlayerPenguin({ visible }) {
   const group = useRef();
   const { scene, animations } = useGLTF("/models/penguin.glb");
@@ -30,20 +31,18 @@ function PlayerPenguin({ visible }) {
   const mixer = useMemo(() => new THREE.AnimationMixer(clonedScene), [clonedScene]);
   const { camera } = useThree();
 
-  // FIX: Animation now explicitly restarts whenever the game becomes visible
   useEffect(() => {
-    if (visible && animations && animations.length > 0) {
-      const action = mixer.clipAction(animations[0]);
-      action.reset().play();
-    } else {
-      mixer.stopAllAction();
+    // FIX: The animation plays ONCE and loops forever. It never stops, preventing the 2nd-trial freeze.
+    if (animations && animations.length > 0) {
+      mixer.clipAction(animations[0]).play();
     }
-  }, [visible, mixer, animations]);
+  }, [mixer, animations]);
 
   useFrame((_, delta) => {
-    if (!visible) return;
+    // FIX: The mixer always updates in the background, even when invisible
     mixer.update(delta); 
-    if (!group.current) return;
+    
+    if (!visible || !group.current) return;
     
     const targetPosition = new THREE.Vector3(0, -0.25, -1.3);
     targetPosition.applyMatrix4(camera.matrixWorld);
@@ -62,17 +61,16 @@ function PlayerPenguin({ visible }) {
   );
 }
 
-// 2. ENVIRONMENT
+// 2. ENVIRONMENT (PERPETUAL MOTION BYPASS)
 function Environment({ visible }) {
   const { scene, animations } = useGLTF("/models/seabed.glb");
   const clonedScene = useMemo(() => SkeletonUtils.clone(scene), [scene]);
   const mixer = useMemo(() => new THREE.AnimationMixer(clonedScene), [clonedScene]);
 
   useEffect(() => {
-    if (visible && animations && animations.length > 0) {
-      animations.forEach((clip) => mixer.clipAction(clip).reset().play());
-    } else {
-      mixer.stopAllAction();
+    // FIX: Plays endlessly to prevent skeletal caching freezes
+    if (animations && animations.length > 0) {
+      animations.forEach((clip) => mixer.clipAction(clip).play());
     }
 
     if (clonedScene) {
@@ -88,10 +86,11 @@ function Environment({ visible }) {
         }
       });
     }
-  }, [visible, clonedScene, animations, mixer]);
+  }, [clonedScene, animations, mixer]);
 
   useFrame((_, delta) => {
-    if (visible) mixer.update(delta);
+    // FIX: Always updates
+    mixer.update(delta);
   });
 
   return (
@@ -104,7 +103,7 @@ function Environment({ visible }) {
   );
 }
 
-// 3. SPAWNER (Endless Runner Logic)
+// 3. SPAWNER 
 function Spawner({ onSpawn, isActive }) {
   const { camera } = useThree();
 
@@ -114,7 +113,6 @@ function Spawner({ onSpawn, isActive }) {
       const types = ['fish', 'squid', 'plastic'];
       const itemType = types[Math.floor(Math.random() * types.length)];
       
-      // Spawn items 5-7 meters directly in front of the camera, spread left/right/up/down
       const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
       forward.y = 0; 
       forward.normalize();
@@ -130,7 +128,7 @@ function Spawner({ onSpawn, isActive }) {
         id: Date.now() + Math.random(),
         type: itemType,
         pos: [spawnX, spawnY, spawnZ],
-        speed: 0.8 + Math.random() * 0.4 // Slower, manageable speed
+        speed: 0.8 + Math.random() * 0.4
       });
     }, 2000);
 
@@ -148,9 +146,8 @@ function AnimatedItem({ modelPath, scale }) {
 
   useEffect(() => {
     if (animations && animations.length > 0) {
-      mixer.clipAction(animations[0]).reset().play().setEffectiveTimeScale(1.5); 
+      mixer.clipAction(animations[0]).play().setEffectiveTimeScale(1.5); 
     }
-    return () => mixer.stopAllAction();
   }, [mixer, animations]);
 
   useFrame((_, delta) => mixer.update(delta));
@@ -176,7 +173,7 @@ function StaticItem({ modelPath, scale }) {
   );
 }
 
-// INDIVIDUAL ITEM LOGIC (Straight-line movement to prevent piling)
+// INDIVIDUAL ITEM LOGIC 
 function GameItem({ id, type, startPos, speed, onCollect, onMiss }) {
   const group = useRef();
   const { camera } = useThree();
@@ -184,20 +181,17 @@ function GameItem({ id, type, startPos, speed, onCollect, onMiss }) {
   useFrame((_, delta) => {
     if (!group.current) return;
 
-    // 1. Move purely in a straight line towards the camera Z plane
     const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(camera.quaternion);
     forward.y = 0; 
     forward.normalize();
     group.current.position.addScaledVector(forward, speed * delta);
 
-    // 2. Collision Check (Is it touching the penguin?)
     const penguinPos = new THREE.Vector3(0, -0.25, -1.3).applyMatrix4(camera.matrixWorld);
     const distToPenguin = group.current.position.distanceTo(penguinPos);
 
     if (distToPenguin < 0.5) {
       onCollect(id, type);
     } 
-    // 3. Safety Delete (If it misses the penguin and goes behind the camera)
     else if (group.current.position.distanceTo(camera.position) < 0.5 || group.current.position.distanceTo(penguinPos) > 10) {
       onMiss(id);
     }
@@ -217,7 +211,7 @@ export default function App() {
   const [gameState, setGameState] = useState('MENU'); 
   const [items, setItems] = useState([]);
   
-  const [health, setHealth] = useState(50); // Max 100
+  const [health, setHealth] = useState(50); 
   const [fishCount, setFishCount] = useState(0);
   const [squidCount, setSquidCount] = useState(0);
   const [timeLeft, setTimeLeft] = useState(60); 
@@ -268,7 +262,6 @@ export default function App() {
       return;
     }
 
-    // AUDIO WARMUP FIX: Force browser to unlock the audio context on click
     if (collectAudio.current) {
       collectAudio.current.play().then(() => {
         collectAudio.current.pause();
@@ -310,7 +303,6 @@ export default function App() {
     setItems((prev) => [...prev, newItem]);
   }, []);
 
-  // Uses a timeout to safely update state outside of the React Three Fiber render loop
   const handleCollect = useCallback((id, type) => {
     setTimeout(() => {
       setItems((prev) => prev.filter(item => item.id !== id));
