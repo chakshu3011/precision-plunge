@@ -4,7 +4,7 @@ import { useRef, useEffect, useState, Suspense } from "react";
 import * as THREE from "three";
 
 // ==========================================
-// INTERNAL XR SESSION BINDER
+// INTERNAL NATIVE XR SESSION BINDER
 // ==========================================
 function XRManager({ session }) {
   const { gl } = useThree();
@@ -19,27 +19,26 @@ function XRManager({ session }) {
 }
 
 // ==========================================
-// 1. DYNAMIC OCEAN FLOOR ENVIRONMENT
+// 1. TRUE FLOATING MARINE ENVIRONMENT
 // ==========================================
-function Environment() {
+function Environment({ isInAR }) {
   return (
     <group>
-      {/* Sandy Ocean Floor - Shifted down to provide perfect vertical framing */}
-      <mesh position={[0, -1.5, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-        <planeGeometry args={[50, 50]} />
-        <meshStandardMaterial color="#d4b296" roughness={0.9} />
-      </mesh>
-      {/* Ocean ambient fog effect planes */}
-      <mesh position={[0, 3, -5]} rotation={[0.2, 0, 0]}>
-        <cylinderGeometry args={[0.5, 4, 8, 32]} />
-        <meshBasicMaterial color="#3b82f6" transparent opacity={0.08} blending={THREE.AdditiveBlending} depthWrite={false} />
-      </mesh>
+      {/* Sandy Floor - Only visible on desktop simulator mode to keep AR clean */}
+      {!isInAR && (
+        <mesh position={[0, 0, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+          <planeGeometry args={[30, 30]} />
+          <meshStandardMaterial color="#d4b296" roughness={0.9} />
+        </mesh>
+      )}
+      <ambientLight intensity={1.5} />
+      <directionalLight position={[5, 10, 5]} intensity={1.2} />
     </group>
   );
 }
 
 // ==========================================
-// 2. SEA-FLOOR WALKING PENGUIN (FRAMED CORRECTLY)
+// 2. SEA-FLOOR PENGUIN (LOCKED TO TRUE GROUND)
 // ==========================================
 function PlayerPenguin() {
   const group = useRef();
@@ -49,77 +48,71 @@ function PlayerPenguin() {
 
   useEffect(() => {
     if (names && names.length > 0 && actions[names[0]]) {
-      actions[names[0]].reset().fadeIn(0.25).play().setEffectiveTimeScale(1.2);
+      actions[names[0]].reset().fadeIn(0.2).play().setEffectiveTimeScale(1.2);
     }
   }, [actions, names]);
 
   useFrame((_, delta) => {
     if (!group.current || !camera) return;
 
-    // Track position slightly in front of camera path, locked safely to seafloor sand
-    const targetPosition = new THREE.Vector3(0, 0, -1.5); 
+    // Track position 1.2 meters in front of phone view, locked safely to y = 0 (true floor)
+    const targetPosition = new THREE.Vector3(0, 0, -1.2); 
     targetPosition.applyMatrix4(camera.matrixWorld);
-    targetPosition.y = -1.5; // Locked directly onto sandy floor matrix
+    targetPosition.y = 0; // Absolute ground level tracking alignment
 
-    group.current.position.lerp(targetPosition, delta * 6);
+    group.current.position.lerp(targetPosition, delta * 5);
 
-    // Make penguin look naturally toward where the camera is navigating
-    const lookTarget = new THREE.Vector3(camera.position.x, -1.5, camera.position.z);
+    // Turn penguin to face where the camera is looking
+    const lookTarget = new THREE.Vector3(camera.position.x, 0, camera.position.z);
     group.current.lookAt(lookTarget);
   });
 
   return (
-    <group ref={group}>
-      {/* Balanced scale step down to prevent models blocking full screen view */}
-      <primitive object={penguin.scene} scale={0.18} />
+    <group ref={group} position={[0, 0, 0]}>
+      {/* Balanced scale step down to fit comfortably in your room view */}
+      <primitive object={penguin.scene} scale={0.15} />
     </group>
   );
 }
 
 // ==========================================
-// 3. SECURE SPAWNER (NO INSTANT COLLISION)
+// 3. ROBUST ITEM SPAWNER (NO AUTO-COLLIDE)
 // ==========================================
 function Spawner({ onCollectFish, onCollectSquid, onHitPlastic }) {
   const [items, setItems] = useState([]);
   const { camera } = useThree();
-  const fishModel = useGLTF("/models/fish.glb");
 
   useEffect(() => {
     if (!camera) return;
 
     const interval = setInterval(() => {
-      // Pick random item profile item types matching your project constraints
       const rand = Math.random();
       let itemType = "fish";
-      let itemColor = "#ff6b6b";
+      if (rand > 0.6 && rand <= 0.85) itemType = "squid";
+      if (rand > 0.85) itemType = "plastic";
 
-      if (rand > 0.7) {
-        itemType = "squid";
-        itemColor = "#a855f7";
-      } else if (rand > 0.85) {
-        itemType = "plastic";
-        itemColor = "#94a3b8";
-      }
-
-      // Calculate safe trajectory projection vectors far away from initial launch zone
+      // Enforce clean spawn radius minimum 4 meters out so they never overlap instantly
       const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
-      const spawnDistance = 6 + Math.random() * 3;
+      forward.y = 0; // Flatten trajectory vector
+      forward.normalize();
+
+      const spawnDistance = 4.5 + Math.random() * 2.0;
+      const lateralOffset = (Math.random() - 0.5) * 2.5;
+
+      const spawnX = camera.position.x + (forward.x * spawnDistance) - (forward.z * lateralOffset);
+      const spawnZ = camera.position.z + (forward.z * spawnDistance) + (forward.x * lateralOffset);
+      const spawnY = 0.1 + Math.random() * 0.4; // Swim slightly above your real carpet floor
 
       setItems((prev) => [
         ...prev,
         {
           id: Date.now() + Math.random(),
           type: itemType,
-          color: itemColor,
-          pos: [
-            camera.position.x + forward.x * spawnDistance + (Math.random() - 0.5) * 2,
-            -1.4 + Math.random() * 0.5, // Hovering perfectly along bottom floor tracking line
-            camera.position.z + forward.z * spawnDistance + (Math.random() - 0.5) * 2
-          ],
-          speed: 1.5 + Math.random() * 1.0
+          pos: [spawnX, spawnY, spawnZ],
+          speed: 1.0 + Math.random() * 0.6
         }
       ]);
-    }, 2000);
+    }, 2500);
 
     return () => clearInterval(interval);
   }, [camera]);
@@ -129,24 +122,25 @@ function Spawner({ onCollectFish, onCollectSquid, onHitPlastic }) {
 
     setItems((prevItems) => {
       let activeItems = [];
-      const penguinFloorPos = new THREE.Vector3(camera.position.x, -1.5, camera.position.z);
+      const penguinFloorPos = new THREE.Vector3(camera.position.x, 0, camera.position.z);
 
       prevItems.forEach((item) => {
         const itemVec = new THREE.Vector3(...item.pos);
-        
-        // Swim along direct path towards our target penguin tracking array
-        const direction = new THREE.Vector3().subVectors(penguinFloorPos, itemVec).normalize();
+        const targetVec = new THREE.Vector3(camera.position.x, item.pos[1], camera.position.z);
+
+        // Advance objects along floor tracking line toward player position
+        const direction = new THREE.Vector3().subVectors(targetVec, itemVec).normalize();
         itemVec.addScaledVector(direction, item.speed * delta);
         item.pos = [itemVec.x, itemVec.y, itemVec.z];
 
         const distance = itemVec.distanceTo(penguinFloorPos);
 
-        // Precision hit-box radius bounds checks
-        if (distance < 0.5) {
+        // Safe hit registration bounds check
+        if (distance < 0.45) {
           if (item.type === "fish") onCollectFish();
           if (item.type === "squid") onCollectSquid();
           if (item.type === "plastic") onHitPlastic();
-        } else if (distance > 0.2) {
+        } else {
           activeItems.push(item);
         }
       });
@@ -159,13 +153,22 @@ function Spawner({ onCollectFish, onCollectSquid, onHitPlastic }) {
     <group>
       {items.map((item) => (
         <group key={item.id} position={item.pos}>
-          {item.type === "fish" ? (
-            <primitive object={fishModel.scene.clone()} scale={0.0015} />
-          ) : (
-            // Robust procedural fallback configurations for items if asset files miss paths
-            <mesh scale={0.15}>
-              {item.type === "squid" ? <coneGeometry args={[0.5, 1.5, 8]} /> : <boxGeometry args={[1, 0.5, 1]} />}
-              <meshStandardMaterial color={item.color} roughness={0.3} generalUpdate />
+          {item.type === "fish" && (
+            <mesh>
+              <coneGeometry args={[0.08, 0.25, 4]} rotation={[Math.PI / 2, 0, 0]} />
+              <meshStandardMaterial color="#4ade80" emissive="#22c55e" roughness={0.2} />
+            </mesh>
+          )}
+          {item.type === "squid" && (
+            <mesh>
+              <cylinderGeometry args={[0.06, 0.06, 0.25, 6]} />
+              <meshStandardMaterial color="#c084fc" emissive="#a855f7" roughness={0.2} />
+            </mesh>
+          )}
+          {item.type === "plastic" && (
+            <mesh>
+              <boxGeometry args={[0.15, 0.15, 0.15]} />
+              <meshStandardMaterial color="#f87171" emissive="#ef4444" roughness={0.5} />
             </mesh>
           )}
         </group>
@@ -175,20 +178,18 @@ function Spawner({ onCollectFish, onCollectSquid, onHitPlastic }) {
 }
 
 // ==========================================
-// 4. MAIN GAME ROUTER & NATIVE LIFE-CYCLE UI
+// 4. MAIN USER SYSTEM & ARCHITECTURE
 // ==========================================
 export default function App() {
-  const [gameState, setGameState] = useState("intro"); // intro | playing | gameover
+  const [gameState, setGameState] = useState("intro"); 
   const [xrSession, setXrSession] = useState(null);
   const [fishCount, setFishCount] = useState(0);
   const [squidCount, setSquidCount] = useState(0);
   const [score, setScore] = useState(0);
   const [gameOverReason, setGameOverReason] = useState("");
 
-  // Track real-time win conditions matching assignment rubric constraints
   useEffect(() => {
     if (gameState !== "playing") return;
-
     if (fishCount >= 10) {
       triggerGameOver("WIN! Icy collected 10 Fish and is completely full! 🐧🎉");
     } else if (squidCount >= 5) {
@@ -207,12 +208,10 @@ export default function App() {
 
   const startARGame = async () => {
     if (!navigator.xr) {
-      // Smart Fallback: Enables frictionless grading via desktop computers
-      console.warn("WebXR missing. Activating Desktop Preview Simulation Mode.");
+      console.warn("WebXR missing. Activating Desktop Simulator Loop.");
       setGameState("playing");
       return;
     }
-
     try {
       const session = await navigator.xr.requestSession("immersive-ar", {
         requiredFeatures: ["local-floor"],
@@ -228,8 +227,8 @@ export default function App() {
         setXrSession(null);
       });
     } catch (err) {
-      console.error("Critical AR Launch Exception:", err);
-      setGameState("playing"); // Launch Simulator loop if security permissions reject device hardware
+      console.error("Critical AR Init Exception:", err);
+      setGameState("playing"); 
     }
   };
 
@@ -241,22 +240,34 @@ export default function App() {
   };
 
   return (
-    <div style={{ width: "100vw", height: "100vh", position: "fixed", top: 0, left: 0, backgroundColor: "#060b14", overflow: "hidden", fontFamily: "sans-serif" }}>
+    <div 
+      style={{ 
+        width: "100vw", 
+        height: "100vh", 
+        position: "fixed", 
+        top: 0, 
+        left: 0, 
+        // CRITICAL BUG FIX: Swaps to transparent background style during active play 
+        backgroundColor: gameState === "playing" ? "transparent" : "#060b14", 
+        overflow: "hidden", 
+        fontFamily: "sans-serif" 
+      }}
+    >
       
       {/* INTRO SCREEN OVERLAY */}
       {gameState === "intro" && (
-        <div style={{ position: "absolute", inset: 0, backgroundColor: "rgba(6, 11, 20, 0.95)", zIndex: 99999, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "30px", textAlign: "center" }}>
+        <div style={{ position: "absolute", inset: 0, backgroundColor: "#060b14", zIndex: 99999, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "30px", textAlign: "center" }}>
           <h1 style={{ color: "#ffffff", fontSize: "36px", margin: "0 0 10px 0", letterSpacing: "1px" }}>ICY AR</h1>
           <p style={{ color: "#94a3b8", fontSize: "16px", margin: "0 0 30px 0" }}>An Augmented Reality Marine Experience</p>
           
-          <div style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", padding: "20px", borderRadius: "16px", maxWidth: "340px", marginBottom: "40px" }}>
-            <h3 style={{ color: "#3b82f6", margin: "0 0 12px 0", fontSize: "18px" }}>How to Play</h3>
-            <p style={{ color: "#e2e8f0", fontSize: "14px", margin: "6px 0" }}>🐟 Collect <strong style={{ color: "#4ade80" }}>10 Fish</strong> OR</p>
-            <p style={{ color: "#e2e8f0", fontSize: "14px", margin: "6px 0" }}>🦑 Collect <strong style={{ color: "#a855f7" }}>5 Squid</strong> to Win!</p>
-            <p style={{ color: "#f87171", fontSize: "13px", fontWeight: "bold", margin: "12px 0 0 0" }}>⚠️ AVOID FLOATING PLASTIC!</p>
+          <div style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", padding: "25px", borderRadius: "16px", maxWidth: "320px", marginBottom: "40px" }}>
+            <h3 style={{ color: "#3b82f6", margin: "0 0 14px 0", fontSize: "18px" }}>How to Play</h3>
+            <p style={{ color: "#e2e8f0", fontSize: "14px", margin: "8px 0", textAlign: "left" }}>🐟 Collect <strong style={{ color: "#4ade80" }}>10 Fish</strong> OR</p>
+            <p style={{ color: "#e2e8f0", fontSize: "14px", margin: "8px 0", textAlign: "left" }}>🦑 Collect <strong style={{ color: "#c084fc" }}>5 Squid</strong> to Win!</p>
+            <p style={{ color: "#f87171", fontSize: "13px", fontWeight: "bold", margin: "16px 0 0 0", textAlign: "center" }}>⚠️ AVOID RED PLASTIC BLOCKS!</p>
           </div>
 
-          <button onClick={startARGame} style={{ width: "85%", maxWidth: "290px", padding: "18px", fontSize: "16px", fontWeight: "bold", color: "#ffffff", background: "linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)", border: "none", borderRadius: "12px", cursor: "pointer", boxShadow: "0 8px 20px rgba(29, 78, 216, 0.4)", textTransform: "uppercase" }}>
+          <button onClick={startARGame} style={{ width: "85%", maxWidth: "290px", padding: "18px", fontSize: "16px", fontWeight: "bold", color: "#ffffff", background: "linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)", border: "none", borderRadius: "12px", cursor: "pointer", boxShadow: "0 8px 20px rgba(29, 78, 216, 0.3)", textTransform: "uppercase" }}>
             Start AR Game
           </button>
         </div>
@@ -264,53 +275,48 @@ export default function App() {
 
       {/* GAME OVER SCREEN OVERLAY */}
       {gameState === "gameover" && (
-        <div style={{ position: "absolute", inset: 0, backgroundColor: "rgba(6, 11, 20, 0.98)", zIndex: 99999, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "30px", textAlign: "center" }}>
+        <div style={{ position: "absolute", inset: 0, backgroundColor: "#060b14", zIndex: 99999, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "30px", textAlign: "center" }}>
           <h2 style={{ color: "#ffffff", fontSize: "28px", margin: "0 0 20px 0" }}>Game Over</h2>
           <p style={{ color: "#e2e8f0", fontSize: "16px", maxWidth: "300px", lineHeight: "1.5", margin: "0 0 40px 0" }}>{gameOverReason}</p>
           
-          <div style={{ display: "flex", gap: "15px", width: "100%", maxWidth: "320px" }}>
-            <button onClick={resetGameData} style={{ flex: 1, padding: "16px", fontWeight: "bold", color: "#ffffff", backgroundColor: "#3b82f6", border: "none", borderRadius: "12px", cursor: "pointer" }}>
-              Play Again
-            </button>
-            <button onClick={() => setGameState("intro")} style={{ flex: 1, padding: "16px", fontWeight: "bold", color: "#cbd5e1", backgroundColor: "#334155", border: "none", borderRadius: "12px", cursor: "pointer" }}>
-              Main Menu
-            </button>
-          </div>
+          <button onClick={resetGameData} style={{ width: "85%", maxWidth: "260px", padding: "16px", fontWeight: "bold", color: "#ffffff", backgroundColor: "#3b82f6", border: "none", borderRadius: "12px", cursor: "pointer" }}>
+            Return to Menu
+          </button>
         </div>
       )}
 
-      {/* ACTIVE HUD DISPLAYS */}
+      {/* ACTIVE IN-GAME HUD */}
       {gameState === "playing" && (
         <div style={{ position: "absolute", top: "20px", left: "20px", right: "20px", zIndex: 9999, display: "flex", justifyContent: "space-between", pointerEvents: "none" }}>
-          <div style={{ background: "rgba(6, 11, 20, 0.8)", backdropFilter: "blur(4px)", padding: "10px 16px", borderRadius: "12px", border: "1px solid rgba(255,255,255,0.1)" }}>
-            <p style={{ color: "#cbd5e1", fontSize: "12px", margin: "0 0 4px 0", fontWeight: "bold" }}>TARGET TRACKER</p>
-            <p style={{ color: "#4ade80", margin: "2px 0", fontSize: "14px" }}>Fish: {fishCount}/10</p>
-            <p style={{ color: "#a855f7", margin: "2px 0", fontSize: "14px" }}>Squid: {squidCount}/5</p>
+          <div style={{ background: "rgba(6, 11, 20, 0.85)", backdropFilter: "blur(4px)", padding: "12px 16px", borderRadius: "12px", border: "1px solid rgba(255,255,255,0.1)" }}>
+            <p style={{ color: "#4ade80", margin: "2px 0", fontSize: "14px", fontWeight: "bold" }}>Fish: {fishCount}/10</p>
+            <p style={{ color: "#c084fc", margin: "2px 0", fontSize: "14px", fontWeight: "bold" }}>Squid: {squidCount}/5</p>
           </div>
-          <div style={{ background: "rgba(6, 11, 20, 0.8)", backdropFilter: "blur(4px)", padding: "10px 20px", borderRadius: "12px", display: "flex", alignItems: "center", border: "1px solid rgba(255,255,255,0.1)" }}>
+          <div style={{ background: "rgba(6, 11, 20, 0.85)", backdropFilter: "blur(4px)", padding: "12px 20px", borderRadius: "12px", display: "flex", alignItems: "center", border: "1px solid rgba(255,255,255,0.1)" }}>
             <p style={{ color: "#3b82f6", margin: 0, fontWeight: "bold", fontSize: "18px" }}>Score: {score}</p>
           </div>
         </div>
       )}
 
-      {/* RENDER ENVIRONMENT VIEWPORT */}
-      <Canvas style={{ width: "100%", height: "100%" }} camera={{ position: [0, 0.5, 2.5], fov: 65 }}>
+      {/* THREE.JS GRAPHICS VIEWPORT Container */}
+      <Canvas 
+        style={{ width: "100%", height: "100%" }} 
+        camera={{ position: [0, 1.4, 2.0], fov: 65 }}
+        gl={{ alpha: true }} // Allows device camera video matrix layer to show through canvas viewport
+      >
         <XRManager session={xrSession} />
-        <ambientLight intensity={1.0} />
-        <directionalLight position={[5, 12, 6]} intensity={1.4} />
-        
         <Suspense fallback={null}>
-          <Environment />
+          <Environment isInAR={!!xrSession} />
           <PlayerPenguin />
           <Spawner 
             onCollectFish={() => { setFishCount((c) => c + 1); setScore((s) => s + 1); }}
             onCollectSquid={() => { setSquidCount((c) => c + 1); setScore((s) => s + 2); }}
-            onHitPlastic={() => { setScore((s) => Math.max(0, s - 3)); }}
+            onHitPlastic={() => { setScore((s) => Math.max(0, s - 2)); }}
           />
         </Suspense>
 
-        {/* Orbit controls safely active ONLY during desktop browser simulation */}
-        {!xrSession && <OrbitControls maxPolarAngle={Math.PI / 2 - 0.05} minDistance={1} maxDistance={10} />}
+        {/* Desktop Browser Fallback Interface Controls */}
+        {!xrSession && <OrbitControls maxPolarAngle={Math.PI / 2 - 0.05} />}
       </Canvas>
     </div>
   );
