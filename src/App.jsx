@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { useGLTF } from '@react-three/drei';
+import { useGLTF, useAnimations } from '@react-three/drei';
 import * as THREE from 'three';
 import { SkeletonUtils } from 'three-stdlib';
 
@@ -23,27 +23,63 @@ function XRManager({ session }) {
   return null;
 }
 
-// 1. PENGUIN (PERPETUAL MOTION BYPASS)
-function PlayerPenguin({ visible }) {
+// --- NEW FEATURE: BUBBLES ---
+function Bubbles() {
+  const pointsRef = useRef();
+  const [particles] = useState(() => {
+    const temp = [];
+    for (let i = 0; i < 75; i++) {
+      temp.push({
+        pos: [(Math.random() - 0.5) * 10, Math.random() * 5, (Math.random() - 0.5) * 10],
+        vel: Math.random() * 0.5 + 0.2
+      });
+    }
+    return temp;
+  });
+
+  useFrame((_, delta) => {
+    if (!pointsRef.current) return;
+    const positions = pointsRef.current.geometry.attributes.position.array;
+    for (let i = 0; i < 75; i++) {
+      positions[i * 3 + 1] += particles[i].vel * delta; 
+      // Reset bubble to floor when it hits the "roof"
+      if (positions[i * 3 + 1] > 4) {
+        positions[i * 3 + 1] = -1.5; 
+      }
+    }
+    pointsRef.current.geometry.attributes.position.needsUpdate = true;
+  });
+
+  return (
+    <points ref={pointsRef}>
+      <bufferGeometry>
+        <bufferAttribute
+          attach="attributes-position"
+          count={particles.length}
+          array={new Float32Array(particles.flatMap(p => p.pos))}
+          itemSize={3}
+        />
+      </bufferGeometry>
+      <pointsMaterial color="white" size={0.04} transparent opacity={0.6} />
+    </points>
+  );
+}
+
+// 1. PENGUIN (Cleaned up, relying on hard-reload for stability)
+function PlayerPenguin() {
   const group = useRef();
   const { scene, animations } = useGLTF("/models/penguin.glb");
-  const clonedScene = useMemo(() => SkeletonUtils.clone(scene), [scene]);
-  const mixer = useMemo(() => new THREE.AnimationMixer(clonedScene), [clonedScene]);
+  const { actions, names } = useAnimations(animations, group);
   const { camera } = useThree();
 
   useEffect(() => {
-    // FIX: The animation plays ONCE and loops forever. It never stops, preventing the 2nd-trial freeze.
-    if (animations && animations.length > 0) {
-      mixer.clipAction(animations[0]).play();
+    if (names && names.length > 0 && actions[names[0]]) {
+      actions[names[0]].reset().play();
     }
-  }, [mixer, animations]);
+  }, [actions, names]);
 
   useFrame((_, delta) => {
-    // FIX: The mixer always updates in the background, even when invisible
-    mixer.update(delta); 
-    
-    if (!visible || !group.current) return;
-    
+    if (!group.current) return;
     const targetPosition = new THREE.Vector3(0, -0.25, -1.3);
     targetPosition.applyMatrix4(camera.matrixWorld);
     group.current.position.lerp(targetPosition, delta * 5.5);
@@ -53,28 +89,28 @@ function PlayerPenguin({ visible }) {
   });
 
   return (
-    <group ref={group} visible={visible}>
+    <group ref={group}>
       <group rotation={[0, -Math.PI / 2 + Math.PI, 0]}>
-        <primitive object={clonedScene} scale={0.15} />
+        <primitive object={scene} scale={0.15} />
       </group>
     </group>
   );
 }
 
-// 2. ENVIRONMENT (PERPETUAL MOTION BYPASS)
-function Environment({ visible }) {
+// 2. ENVIRONMENT WITH WATER ROOF & SUN RAYS
+function Environment() {
+  const group = useRef();
   const { scene, animations } = useGLTF("/models/seabed.glb");
-  const clonedScene = useMemo(() => SkeletonUtils.clone(scene), [scene]);
-  const mixer = useMemo(() => new THREE.AnimationMixer(clonedScene), [clonedScene]);
+  const { actions, names } = useAnimations(animations, group);
 
   useEffect(() => {
-    // FIX: Plays endlessly to prevent skeletal caching freezes
-    if (animations && animations.length > 0) {
-      animations.forEach((clip) => mixer.clipAction(clip).play());
+    if (names && names.length > 0) {
+      names.forEach(name => {
+        if (actions[name]) actions[name].reset().play();
+      });
     }
-
-    if (clonedScene) {
-      clonedScene.traverse((child) => {
+    if (scene) {
+      scene.traverse((child) => {
         if (child.isMesh) {
           child.castShadow = true;
           child.receiveShadow = true;
@@ -86,29 +122,42 @@ function Environment({ visible }) {
         }
       });
     }
-  }, [clonedScene, animations, mixer]);
-
-  useFrame((_, delta) => {
-    // FIX: Always updates
-    mixer.update(delta);
-  });
+  }, [scene, actions, names]);
 
   return (
-    <group visible={visible}>
+    <group ref={group}>
       <ambientLight intensity={0.9} color="#bae6fd" />
       <directionalLight position={[2, 8, 2]} intensity={1.5} color="#e0f2fe" />
       <pointLight position={[0, 2, 0]} intensity={0.5} color="#38bdf8" />
-      <primitive object={clonedScene} position={[0, -1.4, -1.5]} scale={[1.2, 1.2, 1.2]} />
+      
+      {/* Seabed Model */}
+      <primitive object={scene} position={[0, -1.4, -1.5]} scale={[1.2, 1.2, 1.2]} />
+
+      {/* NEW: Water Roof */}
+      <mesh position={[0, 3.5, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[50, 50]} />
+        <meshBasicMaterial color="#0ea5e9" transparent opacity={0.2} side={THREE.DoubleSide} />
+      </mesh>
+
+      {/* NEW: Sun Rays */}
+      <mesh position={[0, 1.5, -2]} rotation={[Math.PI / 8, 0, 0]}>
+        <cylinderGeometry args={[0.2, 4, 8, 32]} />
+        <meshBasicMaterial color="#e0f2fe" transparent opacity={0.08} depthWrite={false} blending={THREE.AdditiveBlending} side={THREE.DoubleSide} />
+      </mesh>
+      
+      <mesh position={[-2, 1.5, -1]} rotation={[Math.PI / 6, 0, -Math.PI / 12]}>
+        <cylinderGeometry args={[0.1, 2, 8, 32]} />
+        <meshBasicMaterial color="#e0f2fe" transparent opacity={0.06} depthWrite={false} blending={THREE.AdditiveBlending} side={THREE.DoubleSide} />
+      </mesh>
     </group>
   );
 }
 
 // 3. SPAWNER 
-function Spawner({ onSpawn, isActive }) {
+function Spawner({ onSpawn }) {
   const { camera } = useThree();
 
   useEffect(() => {
-    if (!isActive) return;
     const interval = setInterval(() => {
       const types = ['fish', 'squid', 'plastic'];
       const itemType = types[Math.floor(Math.random() * types.length)];
@@ -133,12 +182,12 @@ function Spawner({ onSpawn, isActive }) {
     }, 2000);
 
     return () => clearInterval(interval);
-  }, [camera, onSpawn, isActive]);
+  }, [camera, onSpawn]);
 
   return null;
 }
 
-// 4. GAME OBJECT RENDERERS
+// 4. GAME OBJECT RENDERERS (Only cloned objects need SkeletonUtils)
 function AnimatedItem({ modelPath, scale }) {
   const { scene, animations } = useGLTF(modelPath);
   const clonedScene = useMemo(() => SkeletonUtils.clone(scene), [scene]);
@@ -148,6 +197,7 @@ function AnimatedItem({ modelPath, scale }) {
     if (animations && animations.length > 0) {
       mixer.clipAction(animations[0]).play().setEffectiveTimeScale(1.5); 
     }
+    return () => mixer.stopAllAction();
   }, [mixer, animations]);
 
   useFrame((_, delta) => mixer.update(delta));
@@ -173,7 +223,6 @@ function StaticItem({ modelPath, scale }) {
   );
 }
 
-// INDIVIDUAL ITEM LOGIC 
 function GameItem({ id, type, startPos, speed, onCollect, onMiss }) {
   const group = useRef();
   const { camera } = useThree();
@@ -289,9 +338,10 @@ export default function App() {
       }
 
       session.addEventListener('end', () => {
-        setGameState('MENU');
         setXrSession(null);
         if (ambienceAudio.current) ambienceAudio.current.pause();
+        // Uses functional state update to prevent forcing menu if already in gameover
+        setGameState(prev => prev === 'PLAYING' ? 'MENU' : prev);
       });
     } catch (e) {
       console.error("Failed to start AR Session:", e);
@@ -333,6 +383,11 @@ export default function App() {
       setItems((prev) => prev.filter(item => item.id !== id));
     }, 0);
   }, []);
+
+  // PRODUCTION FIX: Hard reload clears corrupted WebGL contexts entirely
+  const handlePlayAgain = () => {
+    window.location.reload();
+  };
 
   return (
     <div id="xr-overlay" style={{ width: '100vw', height: '100vh', position: 'relative', overflow: 'hidden', background: gameState === 'PLAYING' ? 'transparent' : '#0b1d3a' }}>
@@ -379,6 +434,7 @@ export default function App() {
         </div>
       )}
 
+      {/* GAME OVER SCREEN */}
       {gameState === 'GAMEOVER' && (
         <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', zIndex: 20, background: 'rgba(11, 29, 58, 0.95)', color: '#fff', fontFamily: 'sans-serif', padding: '20px', textAlign: 'center' }}>
           <h1 style={{ fontSize: '42px', marginBottom: '8px', color: health <= 0 ? '#ef4444' : '#f8fafc' }}>
@@ -395,31 +451,52 @@ export default function App() {
             </div>
           </div>
 
-          <button onClick={() => setGameState('MENU')} style={{ background: '#2563eb', border: 'none', color: '#fff', padding: '14px 36px', fontSize: '16px', fontWeight: 'bold', borderRadius: '8px', cursor: 'pointer', boxShadow: '0 4px 14px rgba(37, 99, 235, 0.4)' }}>
-            PLAY AGAIN
-          </button>
+          <div style={{ display: 'flex', gap: '15px' }}>
+            <button onClick={handlePlayAgain} style={{ background: '#2563eb', border: 'none', color: '#fff', padding: '14px 30px', fontSize: '16px', fontWeight: 'bold', borderRadius: '8px', cursor: 'pointer', boxShadow: '0 4px 14px rgba(37, 99, 235, 0.4)' }}>
+              PLAY AGAIN
+            </button>
+            <button onClick={() => setGameState('THANKYOU')} style={{ background: 'transparent', border: '2px solid #64748b', color: '#e2e8f0', padding: '14px 30px', fontSize: '16px', fontWeight: 'bold', borderRadius: '8px', cursor: 'pointer' }}>
+              EXIT GAME
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* NEW: THANK YOU SCREEN */}
+      {gameState === 'THANKYOU' && (
+        <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', zIndex: 30, background: 'rgba(11, 29, 58, 1)', color: '#fff', fontFamily: 'sans-serif', padding: '20px', textAlign: 'center' }}>
+          <h1 style={{ fontSize: '48px', marginBottom: '15px', color: '#38bdf8' }}>Thank You!</h1>
+          <p style={{ fontSize: '18px', color: '#cbd5e1', maxWidth: '400px', lineHeight: '1.6', marginBottom: '40px' }}>
+            Thank you for playing ICY AR and helping keep our virtual oceans clean and safe.
+          </p>
+          <div style={{ width: '60px', height: '4px', background: '#38bdf8', borderRadius: '2px', opacity: 0.5 }}></div>
         </div>
       )}
 
       <Canvas camera={{ position: [0, 1.5, 0], fov: 70 }} gl={{ alpha: true }}>
         <XRManager session={xrSession} />
         
-        <Environment visible={gameState === 'PLAYING'} />
-        <PlayerPenguin visible={gameState === 'PLAYING'} />
-        
-        <Spawner onSpawn={handleSpawn} isActive={gameState === 'PLAYING'} />
-        
-        {items.map((item) => (
-          <GameItem 
-            key={item.id} 
-            id={item.id}
-            type={item.type} 
-            startPos={item.pos} 
-            speed={item.speed}
-            onCollect={handleCollect}
-            onMiss={handleMiss}
-          />
-        ))}
+        {gameState === 'PLAYING' && (
+          <>
+            <Environment />
+            <PlayerPenguin />
+            <Bubbles />
+            
+            <Spawner onSpawn={handleSpawn} isActive={true} />
+            
+            {items.map((item) => (
+              <GameItem 
+                key={item.id} 
+                id={item.id}
+                type={item.type} 
+                startPos={item.pos} 
+                speed={item.speed}
+                onCollect={handleCollect}
+                onMiss={handleMiss}
+              />
+            ))}
+          </>
+        )}
       </Canvas>
     </div>
   );
