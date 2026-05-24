@@ -1,6 +1,6 @@
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { useGLTF, useAnimations, OrbitControls } from "@react-three/drei";
-import { useRef, useEffect, useState, Suspense } from "react";
+import { useRef, useEffect, useState, Suspense, useMemo } from "react";
 import * as THREE from "three";
 
 // ==========================================
@@ -19,30 +19,135 @@ function XRManager({ session }) {
 }
 
 // ==========================================
-// 1. TRUE FLOATING MARINE ENVIRONMENT
+// 1. VOLUMETRIC SUN RAYS & DRIFTING BUBBLES
 // ==========================================
-function Environment({ isInAR }) {
+function OceanEffects() {
+  const pointsRef = useRef();
+  const raysRef = useRef();
+
+  // Create a field of 80 floating ocean particles (bubbles/plankton)
+  const count = 80;
+  const [positions, speeds] = useMemo(() => {
+    const pos = new Float32Array(count * 3);
+    const spd = new Float32Array(count);
+    for (let i = 0; i < count; i++) {
+      pos[i * 3] = (Math.random() - 0.5) * 8;       // X spread
+      pos[i * 3 + 1] = Math.random() * 3;           // Y height (0 to 3m)
+      pos[i * 3 + 2] = (Math.random() - 0.5) * 8;   // Z spread
+      spd[i] = 0.1 + Math.random() * 0.2;           // Upward drift speed
+    }
+    return [pos, spd];
+  }, []);
+
+  useFrame((state, delta) => {
+    // 1. Animate drifting sea particles upward
+    if (pointsRef.current) {
+      const geo = pointsRef.current.geometry;
+      const posArr = geo.attributes.position.array;
+      for (let i = 0; i < count; i++) {
+        posArr[i * 3 + 1] += speeds[i] * delta; // Move up
+        if (posArr[i * 3 + 1] > 3.0) {
+          posArr[i * 3 + 1] = 0; // Reset back to floor level
+        }
+      }
+      geo.attributes.position.needsUpdate = true;
+    }
+
+    // 2. Animate sun ray pulse shimmer
+    if (raysRef.current) {
+      raysRef.current.children.forEach((ray, index) => {
+        ray.rotation.z = Math.sin(state.clock.getElapsedTime() * 0.5 + index) * 0.05;
+        ray.material.opacity = 0.15 + Math.sin(state.clock.getElapsedTime() * 1.2 + index) * 0.05;
+      });
+    }
+  });
+
   return (
     <group>
-      {/* Sandy Floor - Only visible on desktop simulator mode to keep AR clean */}
-      {!isInAR && (
-        <mesh position={[0, 0, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-          <planeGeometry args={[30, 30]} />
-          <meshStandardMaterial color="#d4b296" roughness={0.9} />
-        </mesh>
-      )}
-      <ambientLight intensity={1.5} />
-      <directionalLight position={[5, 10, 5]} intensity={1.2} />
+      {/* Drift Particles */}
+      <points ref={pointsRef}>
+        <bufferGeometry>
+          <bufferAttribute
+            attach="attributes-position"
+            args={[positions, 3]}
+          />
+        </bufferGeometry>
+          <pointsMaterial color="#7dd3fc" size={0.04} transparent opacity={0.6} sizeInverse={false} depthWrite={false} />
+      </points>
+
+      {/* Volumetric Sun Ray Shafts */}
+      <group ref={raysRef} position={[0, 3.0, -2]}>
+        {[0, 1, 2].map((i) => (
+          <mesh key={i} position={[(i - 1) * 1.5, -1.5, 0]} rotation={[0, 0, -0.2]}>
+            <cylinderGeometry args={[0.1, 0.6, 3.5, 16, 1, true]} />
+            <meshBasicMaterial
+              color="#e0f2fe"
+              transparent
+              opacity={0.15}
+              side={THREE.DoubleSide}
+              blending={THREE.AdditiveBlending}
+              depthWrite={false}
+            />
+          </mesh>
+        ))}
+      </group>
     </group>
   );
 }
 
 // ==========================================
-// 2. SEA-FLOOR PENGUIN (LOCKED TO TRUE GROUND)
+// 2. AR-COMPATIBLE UNDERWATER LAYERS
+// ==========================================
+function Environment() {
+  const ceilingRef = useRef();
+
+  useFrame((state) => {
+    // Create a slow wave ripple effect for the water surface
+    if (ceilingRef.current) {
+      ceilingRef.current.rotation.z = state.clock.getElapsedTime() * 0.02;
+    }
+  });
+
+  return (
+    <group>
+      {/* Lighting Stack tuned for marine depth look */}
+      <ambientLight intensity={0.9} color="#bae6fd" />
+      <directionalLight position={[2, 8, 2]} intensity={1.5} color="#e0f2fe" />
+      <pointLight position={[0, 2, 0]} intensity={0.5} color="#38bdf8" />
+
+      {/* Ocean Floor Layer (Semi-transparent sandy overlay on your real floor) */}
+      <mesh position={[0, 0, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[20, 20]} />
+        <meshStandardMaterial 
+          color="#1e3a8a" 
+          emissive="#0f172a"
+          roughness={0.9} 
+          transparent 
+          opacity={0.25} // Low opacity ensures your room's actual objects/floor stay visible
+        />
+      </mesh>
+
+      {/* Ocean Water Ceiling Layer (Floating 3 meters above) */}
+      <mesh ref={ceilingRef} position={[0, 3.0, 0]} rotation={[Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[25, 25]} />
+        <meshBasicMaterial 
+          color="#0284c7" 
+          transparent 
+          opacity={0.35} 
+          side={THREE.DoubleSide}
+          wireframe={false}
+        />
+      </mesh>
+    </group>
+  );
+}
+
+// ==========================================
+// 3. SEA-FLOOR PENGUIN (LOCKED TO TRUE GROUND)
 // ==========================================
 function PlayerPenguin() {
   const group = useRef();
-  const penguin = useGLTF("/models/penguin.glb");
+  const penguin = useGLTF("/models/penguin1.glb");
   const { actions, names } = useAnimations(penguin.animations, group);
   const { camera } = useThree();
 
@@ -55,28 +160,28 @@ function PlayerPenguin() {
   useFrame((_, delta) => {
     if (!group.current || !camera) return;
 
-    // Track position 1.2 meters in front of phone view, locked safely to y = 0 (true floor)
-    const targetPosition = new THREE.Vector3(0, 0, -1.2); 
+    // Smoothly interpolate position 1.3 meters in front of the phone screen
+    const targetPosition = new THREE.Vector3(0, 0, -1.3); 
     targetPosition.applyMatrix4(camera.matrixWorld);
-    targetPosition.y = 0; // Absolute ground level tracking alignment
+    targetPosition.y = 0; // Firmly lock to real floor height constraint
 
-    group.current.position.lerp(targetPosition, delta * 5);
+    group.current.position.lerp(targetPosition, delta * 5.5);
 
-    // Turn penguin to face where the camera is looking
+    // Keep the penguin rotated directly toward the player's real coordinates
     const lookTarget = new THREE.Vector3(camera.position.x, 0, camera.position.z);
     group.current.lookAt(lookTarget);
   });
 
   return (
     <group ref={group} position={[0, 0, 0]}>
-      {/* Balanced scale step down to fit comfortably in your room view */}
+      {/* Clean scale mapping for modern mobile glTF assets */}
       <primitive object={penguin.scene} scale={0.15} />
     </group>
   );
 }
 
 // ==========================================
-// 3. ROBUST ITEM SPAWNER (NO AUTO-COLLIDE)
+// 4. BALANCED ITEM SPAWNER (WITH HAZARDS)
 // ==========================================
 function Spawner({ onCollectFish, onCollectSquid, onHitPlastic }) {
   const [items, setItems] = useState([]);
@@ -88,20 +193,23 @@ function Spawner({ onCollectFish, onCollectSquid, onHitPlastic }) {
     const interval = setInterval(() => {
       const rand = Math.random();
       let itemType = "fish";
-      if (rand > 0.6 && rand <= 0.85) itemType = "squid";
-      if (rand > 0.85) itemType = "plastic";
+      
+      // Adjusted weights: 50% Fish, 25% Squid, 25% Plastic Hazard
+      if (rand > 0.50 && rand <= 0.75) itemType = "squid";
+      if (rand > 0.75) itemType = "plastic";
 
-      // Enforce clean spawn radius minimum 4 meters out so they never overlap instantly
+      // Calculate vector trajectories ahead of current camera orientation
       const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
-      forward.y = 0; // Flatten trajectory vector
+      forward.y = 0; 
       forward.normalize();
 
+      // Items spawn spread out further away (4.5 to 6.5 meters) so you can track them coming
       const spawnDistance = 4.5 + Math.random() * 2.0;
-      const lateralOffset = (Math.random() - 0.5) * 2.5;
+      const lateralOffset = (Math.random() - 0.5) * 3.5; // Wider field entry lane
 
       const spawnX = camera.position.x + (forward.x * spawnDistance) - (forward.z * lateralOffset);
       const spawnZ = camera.position.z + (forward.z * spawnDistance) + (forward.x * lateralOffset);
-      const spawnY = 0.1 + Math.random() * 0.4; // Swim slightly above your real carpet floor
+      const spawnY = 0.15 + Math.random() * 0.5; // Floating gracefully off your real floor carpet
 
       setItems((prev) => [
         ...prev,
@@ -109,10 +217,10 @@ function Spawner({ onCollectFish, onCollectSquid, onHitPlastic }) {
           id: Date.now() + Math.random(),
           type: itemType,
           pos: [spawnX, spawnY, spawnZ],
-          speed: 1.0 + Math.random() * 0.6
+          speed: 1.1 + Math.random() * 0.5
         }
       ]);
-    }, 2500);
+    }, 2000); // Faster pool population stream tick rate
 
     return () => clearInterval(interval);
   }, [camera]);
@@ -128,19 +236,20 @@ function Spawner({ onCollectFish, onCollectSquid, onHitPlastic }) {
         const itemVec = new THREE.Vector3(...item.pos);
         const targetVec = new THREE.Vector3(camera.position.x, item.pos[1], camera.position.z);
 
-        // Advance objects along floor tracking line toward player position
+        // Vector tracking travel calculations toward center coordinate base
         const direction = new THREE.Vector3().subVectors(targetVec, itemVec).normalize();
         itemVec.addScaledVector(direction, item.speed * delta);
         item.pos = [itemVec.x, itemVec.y, itemVec.z];
 
         const distance = itemVec.distanceTo(penguinFloorPos);
 
-        // Safe hit registration bounds check
-        if (distance < 0.45) {
+        // Hit Detection Box Volume
+        if (distance < 0.5) {
           if (item.type === "fish") onCollectFish();
           if (item.type === "squid") onCollectSquid();
           if (item.type === "plastic") onHitPlastic();
-        } else {
+        } else if (itemVec.distanceTo(camera.position) > 0.1) {
+          // Keep item active if it hasn't completely sailed past the phone user
           activeItems.push(item);
         }
       });
@@ -155,20 +264,20 @@ function Spawner({ onCollectFish, onCollectSquid, onHitPlastic }) {
         <group key={item.id} position={item.pos}>
           {item.type === "fish" && (
             <mesh>
-              <coneGeometry args={[0.08, 0.25, 4]} rotation={[Math.PI / 2, 0, 0]} />
-              <meshStandardMaterial color="#4ade80" emissive="#22c55e" roughness={0.2} />
+              <coneGeometry args={[0.07, 0.24, 4]} rotation={[Math.PI / 2, 0, 0]} />
+              <meshStandardMaterial color="#22c55e" emissive="#15803d" roughness={0.3} />
             </mesh>
           )}
           {item.type === "squid" && (
             <mesh>
-              <cylinderGeometry args={[0.06, 0.06, 0.25, 6]} />
-              <meshStandardMaterial color="#c084fc" emissive="#a855f7" roughness={0.2} />
+              <cylinderGeometry args={[0.05, 0.05, 0.22, 6]} />
+              <meshStandardMaterial color="#a855f7" emissive="#7e22ce" roughness={0.3} />
             </mesh>
           )}
           {item.type === "plastic" && (
             <mesh>
-              <boxGeometry args={[0.15, 0.15, 0.15]} />
-              <meshStandardMaterial color="#f87171" emissive="#ef4444" roughness={0.5} />
+              <boxGeometry args={[0.18, 0.18, 0.18]} />
+              <meshStandardMaterial color="#ef4444" emissive="#b91c1c" roughness={0.6} />
             </mesh>
           )}
         </group>
@@ -178,7 +287,7 @@ function Spawner({ onCollectFish, onCollectSquid, onHitPlastic }) {
 }
 
 // ==========================================
-// 4. MAIN USER SYSTEM & ARCHITECTURE
+// 5. MAIN USER SYSTEM & ARCHITECTURE
 // ==========================================
 export default function App() {
   const [gameState, setGameState] = useState("intro"); 
@@ -208,7 +317,7 @@ export default function App() {
 
   const startARGame = async () => {
     if (!navigator.xr) {
-      console.warn("WebXR missing. Activating Desktop Simulator Loop.");
+      console.warn("WebXR missing. Activating Desktop Fallback Simulator.");
       setGameState("playing");
       return;
     }
@@ -247,7 +356,6 @@ export default function App() {
         position: "fixed", 
         top: 0, 
         left: 0, 
-        // CRITICAL BUG FIX: Swaps to transparent background style during active play 
         backgroundColor: gameState === "playing" ? "transparent" : "#060b14", 
         overflow: "hidden", 
         fontFamily: "sans-serif" 
@@ -298,24 +406,24 @@ export default function App() {
         </div>
       )}
 
-      {/* THREE.JS GRAPHICS VIEWPORT Container */}
+      {/* THREE.JS GRAPHICS VIEWPORT */}
       <Canvas 
         style={{ width: "100%", height: "100%" }} 
         camera={{ position: [0, 1.4, 2.0], fov: 65 }}
-        gl={{ alpha: true }} // Allows device camera video matrix layer to show through canvas viewport
+        gl={{ alpha: true }} 
       >
         <XRManager session={xrSession} />
         <Suspense fallback={null}>
-          <Environment isInAR={!!xrSession} />
+          <Environment />
+          <OceanEffects />
           <PlayerPenguin />
           <Spawner 
             onCollectFish={() => { setFishCount((c) => c + 1); setScore((s) => s + 1); }}
             onCollectSquid={() => { setSquidCount((c) => c + 1); setScore((s) => s + 2); }}
-            onHitPlastic={() => { setScore((s) => Math.max(0, s - 2)); }}
+            onHitPlastic={() => { setScore((s) => Math.max(0, s - 3)); }} // Scaled up deduction penalty
           />
         </Suspense>
 
-        {/* Desktop Browser Fallback Interface Controls */}
         {!xrSession && <OrbitControls maxPolarAngle={Math.PI / 2 - 0.05} />}
       </Canvas>
     </div>
