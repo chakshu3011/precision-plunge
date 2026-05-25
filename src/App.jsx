@@ -23,8 +23,10 @@ function XRManager({ session }) {
   return null;
 }
 
+// 1. UPDATED: Bubbles are now perfect 3D spheres instead of 2D squares
 function Bubbles() {
-  const pointsRef = useRef();
+  const meshRef = useRef();
+  const dummy = useMemo(() => new THREE.Object3D(), []);
   const [particles] = useState(() => {
     const temp = [];
     for (let i = 0; i < 75; i++) {
@@ -37,29 +39,24 @@ function Bubbles() {
   });
 
   useFrame((_, delta) => {
-    if (!pointsRef.current) return;
-    const positions = pointsRef.current.geometry.attributes.position.array;
-    for (let i = 0; i < 75; i++) {
-      positions[i * 3 + 1] += particles[i].vel * delta; 
-      if (positions[i * 3 + 1] > 4) {
-        positions[i * 3 + 1] = -1.5; 
+    if (!meshRef.current) return;
+    particles.forEach((p, i) => {
+      p.pos[1] += p.vel * delta; 
+      if (p.pos[1] > 4) {
+        p.pos[1] = -1.5; 
       }
-    }
-    pointsRef.current.geometry.attributes.position.needsUpdate = true;
+      dummy.position.set(p.pos[0], p.pos[1], p.pos[2]);
+      dummy.updateMatrix();
+      meshRef.current.setMatrixAt(i, dummy.matrix);
+    });
+    meshRef.current.instanceMatrix.needsUpdate = true;
   });
 
   return (
-    <points ref={pointsRef}>
-      <bufferGeometry>
-        <bufferAttribute
-          attach="attributes-position"
-          count={particles.length}
-          array={new Float32Array(particles.flatMap(p => p.pos))}
-          itemSize={3}
-        />
-      </bufferGeometry>
-      <pointsMaterial color="white" size={0.04} transparent opacity={0.6} />
-    </points>
+    <instancedMesh ref={meshRef} args={[null, null, 75]}>
+      <sphereGeometry args={[0.03, 16, 16]} />
+      <meshBasicMaterial color="white" transparent opacity={0.6} />
+    </instancedMesh>
   );
 }
 
@@ -128,9 +125,10 @@ function Environment() {
       
       <primitive object={scene} position={[0, -1.4, -1.5]} scale={[1.2, 1.2, 1.2]} />
 
+      {/* 2. UPDATED: Water Roof made a richer, deeper blue with more visibility */}
       <mesh position={[0, 3.5, 0]} rotation={[-Math.PI / 2, 0, 0]}>
         <planeGeometry args={[50, 50]} />
-        <meshBasicMaterial color="#0ea5e9" transparent opacity={0.2} side={THREE.DoubleSide} />
+        <meshBasicMaterial color="#1d4ed8" transparent opacity={0.35} side={THREE.DoubleSide} />
       </mesh>
 
       <mesh position={[0, 1.5, -2]} rotation={[Math.PI / 8, 0, 0]}>
@@ -151,11 +149,10 @@ function Spawner({ onSpawn }) {
 
   useEffect(() => {
     const interval = setInterval(() => {
-      // 1. UPDATED PROBABILITIES: Fish 60%, Squid 30%, Plastic 10%
       const rand = Math.random();
       let itemType;
-      if (rand < 0.60) itemType = 'fish';
-      else if (rand < 0.90) itemType = 'squid';
+      if (rand < 0.55) itemType = 'fish';
+      else if (rand < 0.85) itemType = 'squid';
       else itemType = 'plastic';
       
       const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
@@ -243,9 +240,9 @@ function GameItem({ id, type, startPos, speed, onCollect, onMiss }) {
 
   return (
     <group ref={group} position={startPos}>
-      {type === 'fish' && <AnimatedItem modelPath="/models/fish.glb" scale={0.0015} />}
-      {type === 'squid' && <AnimatedItem modelPath="/models/squid.glb" scale={0.5} />}
-      {type === 'plastic' && <StaticItem modelPath="/models/plastic.glb" scale={0.015} />}
+      {type === 'fish' && <AnimatedItem modelPath="/models/fish.glb" scale={0.05} />}
+      {type === 'squid' && <AnimatedItem modelPath="/models/squid.glb" scale={0.1} />}
+      {type === 'plastic' && <StaticItem modelPath="/models/plastic.glb" scale={0.05} />}
     </group>
   );
 }
@@ -264,6 +261,8 @@ export default function App() {
   const ambienceAudio = useRef(null);
   const chirpAudio = useRef(null);
   const collectAudio = useRef(null);
+  // 3. UPDATED: Added error audio reference
+  const errorAudio = useRef(null);
 
   useEffect(() => {
     ambienceAudio.current = new Audio("/audios/antarctic_ambience.mp3");
@@ -276,9 +275,13 @@ export default function App() {
     collectAudio.current = new Audio("/audios/fish_collect.mp3");
     collectAudio.current.volume = 0.8;
 
+    errorAudio.current = new Audio("/audios/incorrect.mp3");
+    errorAudio.current.volume = 0.8;
+
     return () => {
       if (ambienceAudio.current) ambienceAudio.current.pause();
       if (chirpAudio.current) chirpAudio.current.pause();
+      if (errorAudio.current) errorAudio.current.pause();
     };
   }, []);
 
@@ -310,6 +313,13 @@ export default function App() {
       collectAudio.current.play().then(() => {
         collectAudio.current.pause();
         collectAudio.current.currentTime = 0;
+      }).catch(e => console.log("Warmup blocked:", e));
+    }
+    // 3. UPDATED: Warm up the error audio as well
+    if (errorAudio.current) {
+      errorAudio.current.play().then(() => {
+        errorAudio.current.pause();
+        errorAudio.current.currentTime = 0;
       }).catch(e => console.log("Warmup blocked:", e));
     }
 
@@ -355,19 +365,25 @@ export default function App() {
         window.navigator.vibrate(40);
       }
       
-      if (collectAudio.current) {
-        collectAudio.current.currentTime = 0;
-        collectAudio.current.play().catch(e => console.log("Audio blocked:", e));
-      }
-
-      if (type === 'fish') {
-        setHealth((h) => Math.min(100, h + 10)); 
-        setFishCount((f) => f + 1);
-      } else if (type === 'squid') {
-        setHealth((h) => Math.min(100, h + 20)); 
-        setSquidCount((s) => s + 1);
-      } else if (type === 'plastic') {
+      // 3. UPDATED: Play specific audio based on collected type
+      if (type === 'plastic') {
+        if (errorAudio.current) {
+          errorAudio.current.currentTime = 0;
+          errorAudio.current.play().catch(e => console.log("Audio blocked:", e));
+        }
         setHealth((h) => Math.max(0, h - 20));   
+      } else {
+        if (collectAudio.current) {
+          collectAudio.current.currentTime = 0;
+          collectAudio.current.play().catch(e => console.log("Audio blocked:", e));
+        }
+        if (type === 'fish') {
+          setHealth((h) => Math.min(100, h + 10)); 
+          setFishCount((f) => f + 1);
+        } else if (type === 'squid') {
+          setHealth((h) => Math.min(100, h + 20)); 
+          setSquidCount((s) => s + 1);
+        }
       }
     }, 0);
   }, []);
@@ -382,7 +398,6 @@ export default function App() {
     window.location.reload();
   };
 
-  // 2. UPDATED DYNAMIC BATTERY MESSAGES
   const getBatteryMessage = () => {
     if (health >= 80) return "Incredible! ICY is completely full of energy! 🐧✨";
     if (health >= 40) return "Good job! ICY safely navigated the waters. 🌊🐟";
@@ -445,7 +460,6 @@ export default function App() {
             <div style={{ fontSize: '16px', color: '#94a3b8', marginBottom: '8px' }}>FINAL BATTERY LEVEL</div>
             <div style={{ fontSize: '48px', fontWeight: 'bold', color: health > 30 ? '#4ade80' : '#ef4444', marginBottom: '10px' }}>{health}%</div>
             
-            {/* Added Dynamic Text */}
             <div style={{ fontSize: '15px', color: '#cbd5e1', fontStyle: 'italic', marginBottom: '16px' }}>
               "{getBatteryMessage()}"
             </div>
@@ -467,7 +481,6 @@ export default function App() {
         </div>
       )}
 
-      {/* 3. UPDATED: THANK YOU SCREEN */}
       {gameState === 'THANKYOU' && (
         <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', zIndex: 30, background: 'rgba(11, 29, 58, 1)', color: '#fff', fontFamily: 'sans-serif', padding: '30px', textAlign: 'center' }}>
           <h1 style={{ fontSize: '48px', marginBottom: '15px', color: '#38bdf8' }}>Thank You!</h1>
