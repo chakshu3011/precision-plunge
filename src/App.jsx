@@ -240,9 +240,9 @@ function GameItem({ id, type, startPos, speed, onCollect, onMiss }) {
 
   return (
     <group ref={group} position={startPos}>
-      {type === 'fish' && <AnimatedItem modelPath="/models/fish.glb" scale={0.05} />}
-      {type === 'squid' && <AnimatedItem modelPath="/models/squid.glb" scale={0.1} />}
-      {type === 'plastic' && <StaticItem modelPath="/models/plastic.glb" scale={0.05} />}
+      {type === 'fish' && <AnimatedItem modelPath="/models/fish.glb" scale={0.002} />}
+      {type === 'squid' && <AnimatedItem modelPath="/models/squid.glb" scale={0.5} />}
+      {type === 'plastic' && <StaticItem modelPath="/models/plastic.glb" scale={0.03} />}
     </group>
   );
 }
