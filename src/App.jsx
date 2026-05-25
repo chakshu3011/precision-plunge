@@ -261,7 +261,6 @@ export default function App() {
   const ambienceAudio = useRef(null);
   const chirpAudio = useRef(null);
   const collectAudio = useRef(null);
-  // 3. UPDATED: Added error audio reference
   const errorAudio = useRef(null);
 
   useEffect(() => {
@@ -315,7 +314,6 @@ export default function App() {
         collectAudio.current.currentTime = 0;
       }).catch(e => console.log("Warmup blocked:", e));
     }
-    // 3. UPDATED: Warm up the error audio as well
     if (errorAudio.current) {
       errorAudio.current.play().then(() => {
         errorAudio.current.pause();
@@ -365,7 +363,6 @@ export default function App() {
         window.navigator.vibrate(40);
       }
       
-      // 3. UPDATED: Play specific audio based on collected type
       if (type === 'plastic') {
         if (errorAudio.current) {
           errorAudio.current.currentTime = 0;
@@ -399,10 +396,10 @@ export default function App() {
   };
 
   const getBatteryMessage = () => {
-    if (health >= 80) return "Incredible! ICY is completely full of energy! 🐧✨";
-    if (health >= 40) return "Good job! ICY safely navigated the waters. 🌊🐟";
-    if (health > 0) return "Phew! That was close. ICY is exhausted! 🔋📉";
-    return "Oh no! Too much plastic drained ICY's energy. 💔";
+    if (health >= 80) return "Incredible! Your penguin is completely full of energy! 🐧✨";
+    if (health >= 40) return "Good job! You safely navigated the waters. 🌊🐟";
+    if (health > 0) return "Phew! That was close. Your penguin is exhausted! 🔋📉";
+    return "Oh no! Too much plastic drained your energy. 💔";
   };
 
   return (
@@ -436,12 +433,16 @@ export default function App() {
 
       {gameState === 'MENU' && (
         <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', zIndex: 20, background: 'rgba(11, 29, 58, 0.95)', color: '#fff', fontFamily: 'sans-serif', padding: '20px', textAlign: 'center' }}>
-          <h1 style={{ fontSize: '36px', marginBottom: '8px', letterSpacing: '2px' }}>ICY AR</h1>
+          <h1 style={{ fontSize: '36px', marginBottom: '8px', letterSpacing: '2px' }}>PENGUIN DASH</h1>
           <p style={{ color: '#94a3b8', marginBottom: '20px' }}>An Augmented Reality Marine Experience</p>
           
-          <div style={{ background: 'rgba(255, 255, 255, 0.05)', padding: '15px 25px', borderRadius: '8px', marginBottom: '30px', fontSize: '14px', color: '#e2e8f0', maxWidth: '300px', lineHeight: '1.6', border: '1px solid rgba(255,255,255,0.1)' }}>
-            <strong>How to Play:</strong><br />
-            Move your phone up, down, left, and right to steer the penguin. Catch fish and squid to fill your Energy Bar! Avoid red plastic hazards! You have 60 seconds.
+          <div style={{ background: 'rgba(255, 255, 255, 0.05)', padding: '20px 25px', borderRadius: '8px', marginBottom: '30px', fontSize: '15px', color: '#e2e8f0', maxWidth: '320px', lineHeight: '1.6', border: '1px solid rgba(255,255,255,0.1)', textAlign: 'left' }}>
+            <strong style={{ display: 'block', marginBottom: '10px', fontSize: '16px', textAlign: 'center' }}>How to Play:</strong>
+            <ol style={{ paddingLeft: '20px', margin: 0 }}>
+              <li style={{ marginBottom: '10px' }}>Move your phone up, down, left, and right to steer the penguin.</li>
+              <li style={{ marginBottom: '10px' }}>Catch fish and squid to fill your Energy Bar!</li>
+              <li>Avoid red plastic hazards to survive the full 60 seconds!</li>
+            </ol>
           </div>
 
           <button onClick={initiateXRSession} style={{ background: '#2563eb', border: 'none', color: '#fff', padding: '14px 36px', fontSize: '16px', fontWeight: 'bold', borderRadius: '8px', cursor: 'pointer', boxShadow: '0 4px 14px rgba(37, 99, 235, 0.4)' }}>
@@ -485,7 +486,7 @@ export default function App() {
         <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', zIndex: 30, background: 'rgba(11, 29, 58, 1)', color: '#fff', fontFamily: 'sans-serif', padding: '30px', textAlign: 'center' }}>
           <h1 style={{ fontSize: '48px', marginBottom: '15px', color: '#38bdf8' }}>Thank You!</h1>
           <p style={{ fontSize: '18px', color: '#cbd5e1', maxWidth: '450px', lineHeight: '1.6', marginBottom: '40px' }}>
-            Thank you for playing ICY AR! Plastic pollution is incredibly deadly to marine life. By helping ICY safely avoid the plastic bottles, you did your part to keep our virtual oceans clean and safe.
+            Thank you for playing Penguin Dash! Plastic pollution is incredibly deadly to marine life. By helping the penguin safely avoid the plastic bottles, you did your part to keep our virtual oceans clean and safe.
           </p>
           <div style={{ width: '60px', height: '4px', background: '#38bdf8', borderRadius: '2px', opacity: 0.5 }}></div>
         </div>
