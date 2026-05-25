@@ -23,6 +23,7 @@ function XRManager({ session }) {
   return null;
 }
 
+// 1. UPDATED: Bubbles are now perfect 3D spheres instead of 2D squares
 function Bubbles() {
   const meshRef = useRef();
   const dummy = useMemo(() => new THREE.Object3D(), []);
@@ -124,6 +125,7 @@ function Environment() {
       
       <primitive object={scene} position={[0, -1.4, -1.5]} scale={[1.2, 1.2, 1.2]} />
 
+      {/* 2. UPDATED: Water Roof made a richer, deeper blue with more visibility */}
       <mesh position={[0, 3.5, 0]} rotation={[-Math.PI / 2, 0, 0]}>
         <planeGeometry args={[50, 50]} />
         <meshBasicMaterial color="#1d4ed8" transparent opacity={0.35} side={THREE.DoubleSide} />
@@ -238,9 +240,9 @@ function GameItem({ id, type, startPos, speed, onCollect, onMiss }) {
 
   return (
     <group ref={group} position={startPos}>
-      {type === 'fish' && <AnimatedItem modelPath="/models/fish.glb" scale={0.05} />}
-      {type === 'squid' && <AnimatedItem modelPath="/models/squid.glb" scale={0.1} />}
-      {type === 'plastic' && <StaticItem modelPath="/models/plastic.glb" scale={0.05} />}
+      {type === 'fish' && <AnimatedItem modelPath="/models/fish.glb" scale={0.002} />}
+      {type === 'squid' && <AnimatedItem modelPath="/models/squid.glb" scale={0.5} />}
+      {type === 'plastic' && <StaticItem modelPath="/models/plastic.glb" scale={0.02} />}
     </group>
   );
 }
@@ -259,6 +261,7 @@ export default function App() {
   const ambienceAudio = useRef(null);
   const chirpAudio = useRef(null);
   const collectAudio = useRef(null);
+  // 3. UPDATED: Added error audio reference
   const errorAudio = useRef(null);
 
   useEffect(() => {
@@ -312,6 +315,7 @@ export default function App() {
         collectAudio.current.currentTime = 0;
       }).catch(e => console.log("Warmup blocked:", e));
     }
+    // 3. UPDATED: Warm up the error audio as well
     if (errorAudio.current) {
       errorAudio.current.play().then(() => {
         errorAudio.current.pause();
@@ -361,6 +365,7 @@ export default function App() {
         window.navigator.vibrate(40);
       }
       
+      // 3. UPDATED: Play specific audio based on collected type
       if (type === 'plastic') {
         if (errorAudio.current) {
           errorAudio.current.currentTime = 0;
@@ -401,8 +406,7 @@ export default function App() {
   };
 
   return (
-    // NEW FIX: The background div now applies a translucent blue tint during PLAYING to act as an underwater camera filter
-    <div id="xr-overlay" style={{ width: '100vw', height: '100vh', position: 'relative', overflow: 'hidden', background: gameState === 'PLAYING' ? 'rgba(29, 78, 216, 0.2)' : '#0b1d3a' }}>
+    <div id="xr-overlay" style={{ width: '100vw', height: '100vh', position: 'relative', overflow: 'hidden', background: gameState === 'PLAYING' ? 'transparent' : '#0b1d3a' }}>
       
       {gameState === 'PLAYING' && (
         <>
@@ -488,8 +492,6 @@ export default function App() {
       )}
 
       <Canvas camera={{ position: [0, 1.5, 0], fov: 70 }} gl={{ alpha: true }}>
-        {/* NEW FIX: Fog added directly to the canvas so 3D objects fade naturally into the blue ocean depth */}
-        <fog attach="fog" args={['#1d4ed8', 1, 12]} />
         <XRManager session={xrSession} />
         
         {gameState === 'PLAYING' && (
